@@ -185,7 +185,7 @@ private struct GeneralTab: View {
                     prefs.statusIconStyle = style
                 } label: {
                     Image(nsImage: style.makeImage(size: 20))
-                        .renderingMode(.template)
+                        .renderingMode(style.isTemplate ? .template : .original)
                         .foregroundColor(isSelected ? accent : .primary)
                         .frame(maxWidth: .infinity, minHeight: 34)
                         .background(

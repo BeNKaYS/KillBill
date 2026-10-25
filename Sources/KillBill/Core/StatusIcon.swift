@@ -6,6 +6,8 @@ import AppKit
 // ve sistem vurgusuna otomatik uyum sağlarlar.
 
 enum StatusIconStyle: String, CaseIterable, Identifiable {
+    // Uygulama simgesi (renkli, template değil)
+    case appIcon
     // Elle çizilen simgeler
     case ringSlash
     case powerRing
@@ -25,8 +27,22 @@ enum StatusIconStyle: String, CaseIterable, Identifiable {
     /// Bu sistemde simge gerçekten var mı? (Eski macOS sürümlerinde
     /// bazı semboller bulunmaz; seçicide göstermeyiz.)
     var isAvailable: Bool {
+        if self == .appIcon { return StatusIconStyle.appIconSource() != nil }
         guard let name = symbolName else { return true }
         return NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil
+    }
+
+    /// Renkli simgeler template olarak çizilemez; menü çubuğunda kendi rengiyle durur.
+    var isTemplate: Bool { self != .appIcon }
+
+    /// Uygulama simgesinin kaynağı (önce paket, yoksa sistem simgesi).
+    static func appIconSource() -> NSImage? {
+        if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let img = NSImage(contentsOf: url) {
+            return img
+        }
+        let sys = NSApp?.applicationIconImage
+        return (sys?.size.width ?? 0) > 32 ? sys : nil
     }
 
     /// Seçicide gösterilecek simgeler.
@@ -34,6 +50,7 @@ enum StatusIconStyle: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
+        case .appIcon:     return "Uygulama simgesi"
         case .ringSlash:   return "Halka + çizgi"
         case .powerRing:   return "Güç halkası"
         case .power:       return "Açma / kapama"
@@ -51,7 +68,7 @@ enum StatusIconStyle: String, CaseIterable, Identifiable {
     /// SF Symbols adı; elle çizilen simgelerde nil.
     private var symbolName: String? {
         switch self {
-        case .ringSlash, .powerRing: return nil
+        case .appIcon, .ringSlash, .powerRing: return nil
         case .power:        return "power"
         case .bolt:         return "bolt.fill"
         case .crossCircle:  return "xmark.circle"
@@ -67,6 +84,9 @@ enum StatusIconStyle: String, CaseIterable, Identifiable {
     /// Menü çubuğu için template NSImage üretir.
     /// Simge bulunamazsa (eski sistem) elle çizilen halkaya düşer.
     func makeImage(size: CGFloat = 18) -> NSImage {
+        if self == .appIcon {
+            return makeAppIconImage(size: size)
+        }
         if let name = symbolName,
            let symbol = NSImage(systemSymbolName: name, accessibilityDescription: label)?
             .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: size * 0.78, weight: .semibold)) {
@@ -83,6 +103,39 @@ enum StatusIconStyle: String, CaseIterable, Identifiable {
         let drawn = drawCustom(size: size)
         drawn.isTemplate = true
         return drawn
+    }
+
+    // MARK: Uygulama simgesi
+
+    /// Uygulama simgesini menü çubuğu boyutuna indirger.
+    /// Küçük boyutta okunabilirlik için hafif yuvarlatılmış köşeyle çizilir.
+    private func makeAppIconImage(size: CGFloat) -> NSImage {
+        let canvas = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+            guard let source = StatusIconStyle.appIconSource() else {
+                // Simge bulunamazsa ince bir çerçeve çiz (boş yer bırakma)
+                let p = NSBezierPath(roundedRect: rect.insetBy(dx: 1.5, dy: 1.5), xRadius: 4, yRadius: 4)
+                p.lineWidth = 1.4
+                NSColor.black.setStroke()
+                p.stroke()
+                return true
+            }
+            // Kaynağın kendi kenar boşluğunu koru, kareye sığdır.
+            let inset: CGFloat = 0.5
+            let box = rect.insetBy(dx: inset, dy: inset)
+            let srcSize = source.size
+            let side = min(srcSize.width, srcSize.height)
+            let srcRect = NSRect(x: (srcSize.width - side) / 2,
+                                 y: (srcSize.height - side) / 2,
+                                 width: side, height: side)
+            let radius: CGFloat = size * 0.22
+            NSGraphicsContext.saveGraphicsState()
+            NSBezierPath(roundedRect: box, xRadius: radius, yRadius: radius).addClip()
+            source.draw(in: box, from: srcRect, operation: .sourceOver, fraction: 1.0)
+            NSGraphicsContext.restoreGraphicsState()
+            return true
+        }
+        canvas.isTemplate = false
+        return canvas
     }
 
     // MARK: Elle çizim

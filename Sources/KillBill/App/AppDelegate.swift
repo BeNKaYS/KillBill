@@ -20,8 +20,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Menü çubuğu öğesi
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
-            button.image = PreferencesManager.shared.statusIconStyle.makeImage()
-            button.image?.isTemplate = true
+            let style = PreferencesManager.shared.statusIconStyle
+            button.image = style.makeImage()
+            button.image?.isTemplate = style.isTemplate
             button.action = #selector(togglePopover)
             button.target = self
         }
@@ -31,7 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .receive(on: RunLoop.main)
             .sink { [weak self] style in
                 self?.statusItem.button?.image = style.makeImage()
-                self?.statusItem.button?.image?.isTemplate = true
+                self?.statusItem.button?.image?.isTemplate = style.isTemplate
             }
             .store(in: &cancellables)
 
