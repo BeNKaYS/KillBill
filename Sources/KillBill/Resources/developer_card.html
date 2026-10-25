@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="tr" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>BeNKaYS | Sercan ÖZDEMİR - Geliştirici Kartı</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet"/>
+  <script src="qrcode.min.js"></script>
+  <script>
+    // Yerel qrcode.min.js bulunamazsa CDN'e düş
+    if (typeof QRCode === 'undefined') {
+      document.write('<scr'+'ipt src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><\/scr'+'ipt>');
+    }
+  </script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* ─── TEMA DEĞİŞKENLERİ (KOYU & AÇIK) ──────────────────────────── */
+    :root[data-theme="dark"] {
+      --bg-page:     #090d16;
+      --bg-card:     #111827;
+      --bg-surface:  #1e293b;
+      --bg-hover:    #26354d;
+      --text-main:   #f8fafc;
+      --text-muted:  #94a3b8;
+      --accent-1:    #10b981; /* Neon Yeşil */
+      --accent-2:    #06b6d4; /* Siber Mavi */
+      --border:      #2dd4bf33;
+      --border-soft: #334155;
+      --glow:        0 0 25px rgba(16, 185, 129, 0.2), 0 10px 40px rgba(0, 0, 0, 0.6);
+      --avatar-ring: linear-gradient(135deg, #10b981, #06b6d4, #3b82f6);
+      --qr-dark:     #10b981;
+      --qr-light:    #111827;
+    }
+
+    :root[data-theme="light"] {
+      --bg-page:     #eef2f6;
+      --bg-card:     #ffffff;
+      --bg-surface:  #f1f5f9;
+      --bg-hover:    #e2e8f0;
+      --text-main:   #0f172a;
+      --text-muted:  #475569;
+      --accent-1:    #059669; /* Zümrüt Yeşili */
+      --accent-2:    #0284c7; /* Okyanus Mavisi */
+      --border:      #0284c733;
+      --border-soft: #e2e8f0;
+      --glow:        0 12px 35px rgba(15, 23, 42, 0.08), 0 0 0 1px rgba(15, 23, 42, 0.05);
+      --avatar-ring: linear-gradient(135deg, #2563eb, #06b6d4, #10b981);
+      --qr-dark:     #0f172a;
+      --qr-light:    #ffffff;
+    }
+
+    body {
+      background: var(--bg-page);
+      color: var(--text-main);
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      transition: background 0.35s ease, color 0.35s ease;
+    }
+
+    /* ─── KARE KART KAPSAYICISI (1:1 ORANLI) ───────────────────────── */
+    .dev-card {
+      width: 100%;
+      max-width: 560px;
+      aspect-ratio: 1 / 1;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      box-shadow: var(--glow);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 24px 28px;
+      position: relative;
+      overflow: hidden;
+      transition: all 0.35s ease;
+    }
+
+    /* Siber Köşe Çizgileri */
+    .dev-card::before, .dev-card::after {
+      content: '';
+      position: absolute;
+      width: 40px;
+      height: 40px;
+      border-color: var(--accent-1);
+      border-style: solid;
+      pointer-events: none;
+      opacity: 0.6;
+    }
+    .dev-card::before {
+      top: 12px; left: 12px;
+      border-width: 2px 0 0 2px;
+      border-top-left-radius: 14px;
+    }
+    .dev-card::after {
+      bottom: 12px; right: 12px;
+      border-width: 0 2px 2px 0;
+      border-bottom-right-radius: 14px;
+    }
+
+    /* ─── ÜST BAR & TEMA BUTONU ────────────────────────────────────── */
+    .top-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .terminal-tag {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+      background: var(--bg-surface);
+      padding: 5px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border-soft);
+    }
+    .terminal-tag span { color: var(--accent-1); font-weight: 700; }
+
+    .theme-btn {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-soft);
+      color: var(--text-main);
+      padding: 6px 12px;
+      border-radius: 20px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+    .theme-btn:hover {
+      border-color: var(--accent-1);
+      transform: translateY(-1px);
+    }
+
+    /* ─── PROFİL BAŞLIK ALANI (YUVARLAK MASKE) ─────────────────────── */
+    .profile-header {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      margin-top: 4px;
+    }
+    .avatar-wrapper {
+      position: relative;
+      width: 88px;
+      height: 88px;
+      border-radius: 50%;
+      padding: 3px;
+      background: var(--avatar-ring);
+      box-shadow: 0 0 18px rgba(16, 185, 129, 0.3);
+      flex-shrink: 0;
+    }
+    .avatar-wrapper img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border-radius: 50%; /* Yuvarlak Maske */
+      background: var(--bg-card);
+      display: block;
+    }
+    .status-dot {
+      position: absolute;
+      bottom: 4px;
+      right: 4px;
+      width: 14px;
+      height: 14px;
+      background: #10b981;
+      border: 2.5px solid var(--bg-card);
+      border-radius: 50%;
+    }
+
+    .identity h1 {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .identity .alias {
+      color: var(--accent-1);
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .identity .role {
+      font-size: 12.5px;
+      color: var(--accent-2);
+      font-weight: 600;
+      margin-top: 3px;
+    }
+    .identity .bio {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      margin-top: 6px;
+      line-height: 1.45;
+    }
+
+    /* ─── ORTA ALAN: 2 SÜTUN (BECERİLER & İLETİŞİM/QR) ─────────────── */
+    .main-grid {
+      display: grid;
+      grid-template-columns: 1.25fr 0.95fr;
+      gap: 18px;
+      align-items: center;
+      margin: 6px 0;
+    }
+
+    /* Beceri Çubukları */
+    .skill-item { margin-bottom: 10px; }
+    .skill-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11.5px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .skill-pct {
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--accent-1);
+    }
+    .skill-track {
+      height: 7px;
+      background: var(--bg-surface);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+    .skill-fill {
+      height: 100%;
+      width: 0%;
+      border-radius: 99px;
+      background: linear-gradient(90deg, var(--accent-2), var(--accent-1));
+      transition: width 1.2s cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    /* Rozetler */
+    .badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 12px;
+    }
+    .badge {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10.5px;
+      font-weight: 600;
+      padding: 4px 9px;
+      border-radius: 6px;
+      background: var(--bg-surface);
+      color: var(--text-main);
+      border: 1px solid var(--border-soft);
+      transition: all 0.2s;
+    }
+    .badge:hover {
+      border-color: var(--accent-1);
+      color: var(--accent-1);
+    }
+
+    /* Sağ Panel: QR & Hızlı Butonlar */
+    .right-panel {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-soft);
+      border-radius: 16px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+    .qr-tabs {
+      display: flex;
+      gap: 4px;
+      width: 100%;
+    }
+    .qr-tab {
+      flex: 1;
+      font-size: 10.5px;
+      font-weight: 600;
+      padding: 4px 0;
+      border-radius: 6px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .qr-tab.active {
+      background: var(--bg-card);
+      color: var(--accent-1);
+      border-color: var(--border-soft);
+    }
+    #qr-box {
+      padding: 6px;
+      background: var(--bg-card);
+      border-radius: 10px;
+      border: 1px solid var(--border-soft);
+    }
+
+    .action-links {
+      display: flex;
+      gap: 6px;
+      width: 100%;
+    }
+    .action-btn {
+      flex: 1;
+      text-decoration: none;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-main);
+      background: var(--bg-card);
+      border: 1px solid var(--border-soft);
+      padding: 6px 8px;
+      border-radius: 8px;
+      text-align: center;
+      transition: all 0.2s;
+    }
+    .action-btn:hover {
+      border-color: var(--accent-1);
+      color: var(--accent-1);
+    }
+
+    /* ─── ALT BİLGİ (FOOTER) ───────────────────────────────────────── */
+    .card-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-top: 10px;
+      border-top: 1px solid var(--border-soft);
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .quote {
+      font-family: 'JetBrains Mono', monospace;
+      font-style: italic;
+    }
+    .quote::before { content: '> '; color: var(--accent-1); }
+
+    /* Mobil Uyumluluk */
+    @media (max-width: 540px) {
+      .dev-card { aspect-ratio: auto; padding: 20px; }
+      .main-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="dev-card">
+  <!-- Üst Çubuk -->
+  <div class="top-bar">
+    <div class="terminal-tag"><span>~/BeNKaYS</span>/card.ui</div>
+    <button class="theme-btn" id="themeToggle" onclick="toggleTheme()">
+      <span id="themeIcon">☀️</span> <span id="themeText">Açık Tema</span>
+    </button>
+  </div>
+
+  <!-- Kimlik & Yuvarlak Maskeli Resim -->
+  <div class="profile-header">
+    <div class="avatar-wrapper">
+      <img src="avatar.png" alt="Sercan Özdemir - BeNKaYS" />
+      <span class="status-dot" title="Aktif Geliştirici"></span>
+    </div>
+    <div class="identity">
+      <h1><span class="alias">BeNKaYS</span> / Sercan Özdemir</h1>
+      <div class="role">Bilişim Teknolojileri Öğretmeni · Makine Öğrenmesi · C++</div>
+      <p class="bio">
+        Eğitim ve yazılımı birleştiren; C++, algoritmalar ve Makine Öğrenmesi üzerine projeler geliştiren yazılım öğretmeni.
+      </p>
+    </div>
+  </div>
+
+  <!-- Orta İki Sütunlu Alan -->
+  <div class="main-grid">
+    <!-- Sol: Beceriler & Rozetler -->
+    <div>
+      <div class="skill-item">
+        <div class="skill-header"><span>C++ &amp; OOP</span><span class="skill-pct">95%</span></div>
+        <div class="skill-track"><div class="skill-fill" data-pct="95"></div></div>
+      </div>
+      <div class="skill-item">
+        <div class="skill-header"><span>Eğitim Odaklı Dev</span><span class="skill-pct">95%</span></div>
+        <div class="skill-track"><div class="skill-fill" data-pct="95"></div></div>
+      </div>
+      <div class="skill-item">
+        <div class="skill-header"><span>Algoritma Tasarımı</span><span class="skill-pct">85%</span></div>
+        <div class="skill-track"><div class="skill-fill" data-pct="85"></div></div>
+      </div>
+      <div class="skill-item">
+        <div class="skill-header"><span>Makine Öğrenmesi</span><span class="skill-pct">80%</span></div>
+        <div class="skill-track"><div class="skill-fill" data-pct="80"></div></div>
+      </div>
+
+      <div class="badges">
+        <span class="badge">C++</span>
+        <span class="badge">Python</span>
+        <span class="badge">OpenCV</span>
+        <span class="badge">Linux</span>
+        <span class="badge">Git</span>
+        <span class="badge">ML</span>
+      </div>
+    </div>
+
+    <!-- Sağ: QR & Hızlı Erişim -->
+    <div class="right-panel">
+      <div class="qr-tabs">
+        <button class="qr-tab active" onclick="switchQR('wa', this)">WhatsApp</button>
+        <button class="qr-tab" onclick="switchQR('mail', this)">E-Posta</button>
+      </div>
+      <div id="qr-box"></div>
+      <div class="action-links">
+        <a class="action-btn" href="mailto:sercanozdemir@yandex.com" title="E-posta Gönder">📧 İletişim</a>
+        <a class="action-btn" href="https://github.com/BeNKaYS" target="_blank" title="GitHub Profili">🐙 GitHub</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Alt Bilgi -->
+  <div class="card-footer">
+    <span class="quote">Gündüz sınıf, gece terminal.</span>
+    <span>v2.0 • Square UI</span>
+  </div>
+</div>
+
+<script>
+  const qrData = {
+    wa:   'https://wa.me/905068858585?text=Merhaba%20bilgi%20almak%20istiyorum',
+    mail: 'mailto:sercanozdemir@yandex.com'
+  };
+  let activeQRTarget = 'wa';
+
+  function renderQR() {
+    const box = document.getElementById('qr-box');
+    box.innerHTML = '';
+    if (typeof QRCode === 'undefined') return;
+    const styles = getComputedStyle(document.documentElement);
+    const darkColor = styles.getPropertyValue('--qr-dark').trim();
+    const lightColor = styles.getPropertyValue('--qr-light').trim();
+
+    new QRCode(box, {
+      text: qrData[activeQRTarget],
+      width: 96,
+      height: 96,
+      colorDark: darkColor,
+      colorLight: lightColor,
+      correctLevel: QRCode.CorrectLevel.M
+    });
+  }
+
+  function switchQR(target, btn) {
+    activeQRTarget = target;
+    document.querySelectorAll('.qr-tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    renderQR();
+  }
+
+  function toggleTheme() {
+    const html = document.documentElement;
+    const isDark = html.getAttribute('data-theme') === 'dark';
+    const nextTheme = isDark ? 'light' : 'dark';
+    html.setAttribute('data-theme', nextTheme);
+
+    document.getElementById('themeIcon').textContent = nextTheme === 'dark' ? '☀️' : '🌙';
+    document.getElementById('themeText').textContent = nextTheme === 'dark' ? 'Açık Tema' : 'Koyu Tema';
+    renderQR();
+  }
+
+  window.addEventListener('load', () => {
+    renderQR();
+    setTimeout(() => {
+      document.querySelectorAll('.skill-fill').forEach(el => {
+        el.style.width = el.dataset.pct + '%';
+      });
+    }, 200);
+  });
+</script>
+</body>
+</html>

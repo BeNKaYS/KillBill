@@ -1,0 +1,21 @@
+# macOS
+.DS_Store
+
+# Swift / SPM derleme çıktıları
+.build/
+.swiftpm/
+*.xcodeproj
+*.xcworkspace
+
+# Derlenmiş uygulama ve paketler (Release varlığı olarak yüklenir)
+KillBill.app/
+KillBill.zip
+*.pkg
+
+# OpenChamber / editör
+.openchamber/
+
+# Güncelleme yedeği ve token (asla depoya girmez)
+github-token
+Yedek/
+Staging/

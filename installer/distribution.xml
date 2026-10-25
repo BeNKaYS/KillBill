@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>KillBill</title>
+    <organization>com.benkays</organization>
+    <domains enable_localSystem="true" enable_currentUserHome="false"/>
+    <options customize="never" require-scripts="false" hostArchitectures="x86_64,arm64"/>
+    <allowed-os-versions>
+        <os-version min="13.0"/>
+    </allowed-os-versions>
+
+    <!-- Kurulum başında kısa karşılama -->
+    <welcome file="welcome.html" mime-type="text/html"/>
+
+    <!-- Kurulum sonunda GELİŞTİRİCİ KARTI (BeNKaYS) -->
+    <conclusion file="conclusion.html" mime-type="text/html"/>
+
+    <choices-outline>
+        <line choice="default"/>
+    </choices-outline>
+
+    <choice id="default" visible="false" title="KillBill">
+        <pkg-ref id="com.benkays.killbill"/>
+    </choice>
+
+    <pkg-ref id="com.benkays.killbill" version="1.0.0" onConclusion="none">KillBill-component.pkg</pkg-ref>
+</installer-gui-script>
