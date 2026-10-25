@@ -135,9 +135,9 @@ final class PreferencesManager: ObservableObject {
         includeTrashInList  = (d.object(forKey: Key.includeTrash) as? Int ?? 0) == 1
         useSystemColor      = d.object(forKey: Key.useSystemColor) as? Bool ?? true
         statusIconStyle     = StatusIconStyle(rawValue: d.string(forKey: Key.statusIconStyle) ?? "") ?? .ringSlash
-        updateSourceKind    = UpdateSourceKind(rawValue: d.string(forKey: Key.updateSourceKind) ?? "") ?? .local
+        updateSourceKind    = UpdateSourceKind(rawValue: d.string(forKey: Key.updateSourceKind) ?? "") ?? .github
         updateLocalPath     = d.string(forKey: Key.updateLocalPath) ?? NSHomeDirectory() + "/Desktop/Dev_Folder/KillBill"
-        updateGitHubRepo    = d.string(forKey: Key.updateGitHubRepo) ?? ""
+        updateGitHubRepo    = d.string(forKey: Key.updateGitHubRepo) ?? "BeNKaYS/KillBill"
         updateGitHubMode    = GitHubUpdateMode(rawValue: d.string(forKey: Key.updateGitHubMode) ?? "") ?? .release
         updateBranch        = d.string(forKey: Key.updateBranch) ?? "main"
 
@@ -180,7 +180,7 @@ final class PreferencesManager: ObservableObject {
         includeFinderInList = false
         includeTrashInList = false
         statusIconStyle = .ringSlash
-        updateSourceKind = .local
+        updateSourceKind = .github
         autoQuitEnabled = false; autoQuitMinutes = 15; autoQuitUnit = .minute
         shortcutActivateEnabled = true;  shortcutQuitEnabled = true;  shortcutForceQuitEnabled = true
         shortcutActivate =  ShortcutCombo(keyCode: 0, modifiers: 0, enabled: true)

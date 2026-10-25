@@ -1,5 +1,5 @@
 {
-  "surum": "1.1.0",
+  "surum": "1.1.1",
   "tarih": "2026-10-25",
-  "not": "Menü çubuğu simge seçenekleri, yerel ve GitHub üzerinden güncelleme, Destek/Hakkında/Lisans sekmeleri kaldırıldı."
+  "not": "GitHub deposu hazır; güncelleme kontrolü GitHub Release üzerinden çalışıyor."
 }
