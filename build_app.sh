@@ -1,39 +1,31 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 echo "🚀 KillBill derleniyor (Release)..."
 cd "$(dirname "$0")"
-
-swift build -c release
 
 APP_NAME="KillBill"
 BUNDLE_DIR="$APP_NAME.app"
 MACOS_DIR="$BUNDLE_DIR/Contents/MacOS"
 RESOURCES_DIR="$BUNDLE_DIR/Contents/Resources"
 
+# Sürüm: tek kaynak version.json
+VERSION=$(/usr/bin/python3 -c 'import json;print(json.load(open("version.json"))["surum"])')
+[[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){0,3}$ ]] || { echo "❌ version.json içindeki surum geçersiz: $VERSION"; exit 1; }
+
+swift build -c release
+
 echo "📦 Uygulama paketi (.app) oluşturuluyor..."
 rm -rf "$BUNDLE_DIR"
-mkdir -p "$MACOS_DIR"
-mkdir -p "$RESOURCES_DIR"
-
-# İkili dosyayı kopyala
-cp ".build/release/KillBill" "$MACOS_DIR/$APP_NAME"
-
-# Kaynakları kopyala (Geliştirici Kartı, ikon, JS, sesler)
+mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
+cp ".build/release/$APP_NAME" "$MACOS_DIR/$APP_NAME"
 if [ -d "Sources/KillBill/Resources" ]; then
-    cp -R Sources/KillBill/Resources/* "$RESOURCES_DIR/" 2>/dev/null || true
+    cp -R Sources/KillBill/Resources/* "$RESOURCES_DIR/"
 fi
-
-# Sürüm: tek kaynak version.json
-VERSION="0.0.0"
-if [ -f "version.json" ]; then
-    VERSION=$(/usr/bin/python3 -c 'import json;print(json.load(open("version.json"))["surum"])' 2>/dev/null || echo "0.0.0")
-    cp "version.json" "$RESOURCES_DIR/version.json"
-fi
+cp "version.json" "$RESOURCES_DIR/version.json"
 echo "🔖 Sürüm: $VERSION"
 
-# Info.plist oluştur
-cat << 'EOF' > "$BUNDLE_DIR/Contents/Info.plist"
+cat > "$BUNDLE_DIR/Contents/Info.plist" << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -63,21 +55,26 @@ cat << 'EOF' > "$BUNDLE_DIR/Contents/Info.plist"
     <key>NSHumanReadableCopyright</key>
     <string>Telif Hakkı © 2026 BeNKaYS. Tüm hakları saklıdır.</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>KillBill, diğer uygulamaların pencerelerini kapatmak ve çöp kutusunu boşaltmak için Apple Events erişimi gerektirir.</string>
-    <key>NSDesktopFolderUsageDescription</key>
-    <string>KillBill masaüstü öğelerini yönetmek için masaüstü erişimi gerektirir.</string>
+    <string>KillBill, Finder'ı kapatmak ve çöp kutusunu boşaltmak için Apple Events erişimi ister.</string>
 </dict>
 </plist>
 EOF
 
 /usr/bin/sed -i '' "s/__VERSION__/$VERSION/g" "$BUNDLE_DIR/Contents/Info.plist"
-
 chmod +x "$MACOS_DIR/$APP_NAME"
 
-echo "🔏 Ad-hoc imzalanıyor..."
-codesign --force --deep --sign - --identifier "com.benkays.killbill" "$BUNDLE_DIR" 2>/dev/null || true
+# İmzalama: KILLBILL_SIGN_IDENTITY verilirse gerçek Developer ID ile imzalar.
+# Ad-hoc imza yalnızca yerel geliştirme içindir; dağıtım paketi üretmez.
+if [ -n "${KILLBILL_SIGN_IDENTITY:-}" ]; then
+    echo "🔏 Developer ID ile imzalanıyor: $KILLBILL_SIGN_IDENTITY"
+    codesign --force --deep --options runtime --timestamp \
+             --sign "$KILLBILL_SIGN_IDENTITY" --identifier "com.benkays.killbill" "$BUNDLE_DIR"
+    codesign --verify --deep --strict --verbose=2 "$BUNDLE_DIR"
+else
+    echo "⚠️  Ad-hoc imza (yalnızca yerel kullanım). Dağıtım için KILLBILL_SIGN_IDENTITY ayarlayın."
+    codesign --force --deep --sign - --identifier "com.benkays.killbill" "$BUNDLE_DIR"
+fi
 
-# Güncelleme paketi (yerel kaynak ve GitHub release için)
 echo "🗜️  Güncelleme paketi (KillBill.zip) oluşturuluyor..."
 rm -f "$APP_NAME.zip"
 /usr/bin/ditto -c -k --keepParent "$BUNDLE_DIR" "$APP_NAME.zip"

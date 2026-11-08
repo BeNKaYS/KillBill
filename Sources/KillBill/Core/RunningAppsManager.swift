@@ -11,6 +11,8 @@ struct AppEntry: Identifiable, Equatable {
     var cpu: Double        // yüzde
     var isBackground: Bool
     var isTerminated: Bool
+    var memberPIDs: [Int32] = []
+    var processIDs: [Int32] { memberPIDs.isEmpty ? [id] : memberPIDs }
 
     static func == (l: AppEntry, r: AppEntry) -> Bool { l.id == r.id }
 
@@ -28,9 +30,13 @@ final class RunningAppsManager: ObservableObject {
     private let psQueue = DispatchQueue(label: "com.benkays.killbill.ps", qos: .utility)
     private var timer: Timer?
     private let ownPID = ProcessInfo.processInfo.processIdentifier
+    private var lastCPU: [Int32: Double] = [:]
+    private var sampling = false
+    private var observers: [NSObjectProtocol] = []
 
     // MARK: Tarama
-    func refresh(cpu: [Int32: Double] = [:]) {
+    func refresh(cpu: [Int32: Double]? = nil) {
+        if let cpu { lastCPU = cpu }
         var list: [AppEntry] = []
         for app in NSWorkspace.shared.runningApplications {
             guard app.processIdentifier != ownPID,
@@ -45,13 +51,14 @@ final class RunningAppsManager: ObservableObject {
                 name: app.localizedName ?? "?",
                 bundleID: app.bundleIdentifier,
                 icon: app.icon,
-                cpu: cpu[app.processIdentifier] ?? 0,
+                cpu: lastCPU[app.processIdentifier] ?? 0,
                 isBackground: bg,
                 isTerminated: app.isTerminated
             )
             list.append(entry)
         }
         self.apps = list
+        lastCPU = lastCPU.filter { key, _ in list.contains { $0.id == key } }
     }
 
     /// `ps` üzerinden CPU yüzdelerini toplar (arka planda)
@@ -80,24 +87,53 @@ final class RunningAppsManager: ObservableObject {
     }
 
     func startMonitoring(interval: TimeInterval = 2.0) {
+        if observers.isEmpty {
+            for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
+                observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.refresh() })
+            }
+        }
+        refresh()
+    }
+
+    func setPanelVisible(_ visible: Bool) {
+        timer?.invalidate(); timer = nil
+        guard visible else { return }
         sampleAndRefresh()
-        timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             self?.sampleAndRefresh()
         }
     }
 
-    func stopMonitoring() { timer?.invalidate(); timer = nil }
+    func stopMonitoring() {
+        setPanelVisible(false)
+        observers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }
+        observers.removeAll()
+    }
 
     private func sampleAndRefresh() {
-        sampleCPU { [weak self] cpu in self?.refresh(cpu: cpu) }
+        guard !sampling else { return }
+        sampling = true
+        sampleCPU { [weak self] cpu in self?.sampling = false; self?.refresh(cpu: cpu) }
     }
 
     // MARK: Pano için sıralanmış liste
     func panelList(search: String) -> [AppEntry] {
-        let prefs = PreferencesManager.shared
-        var list = apps
+        Self.filtered(apps, preferences: .shared, search: search)
+    }
+
+    static func filtered(_ apps: [AppEntry], preferences prefs: PreferencesManager, search: String) -> [AppEntry] {
+        var list = apps.filter { prefs.includeFinderInList || $0.bundleID != "com.apple.finder" }
         if !prefs.showBackgroundApps { list = list.filter { !$0.isBackground } }
+        if prefs.groupBackgroundApps {
+            let groups = Dictionary(grouping: list.filter(\.isBackground), by: \.groupKey)
+            list = list.filter { !$0.isBackground } + groups.values.map { members in
+                var entry = members.sorted { $0.id < $1.id }.first!
+                entry.memberPIDs = members.flatMap(\.processIDs)
+                entry.cpu = members.reduce(0) { $0 + $1.cpu }
+                if members.count > 1 { entry.name += " (\(members.count))" }
+                return entry
+            }
+        }
         if !search.isEmpty {
             list = list.filter { $0.name.localizedCaseInsensitiveContains(search) }
         }

@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import Foundation
+import Security
 
 // MARK: - Güncelleme (yerel klasör + GitHub)
 //
@@ -61,7 +62,41 @@ final class UpdateManager: ObservableObject {
     }()
 
     private var backupsDir: URL { supportDir.appendingPathComponent("Yedek", isDirectory: true) }
-    private var tokenFile: URL { supportDir.appendingPathComponent("github-token") }
+    func showBackups() {
+        do {
+            try FileManager.default.createDirectory(at: backupsDir, withIntermediateDirectories: true)
+            NSWorkspace.shared.open(backupsDir)
+        } catch { statusLine = "Yedek klasörü açılamadı: \(error.localizedDescription)" }
+    }
+    private struct Source: Equatable {
+        let kind: UpdateSourceKind
+        let path: String
+        let repo: String
+        let mode: GitHubUpdateMode
+        let branch: String
+        init(_ prefs: PreferencesManager) {
+            kind = prefs.updateSourceKind; path = prefs.updateLocalPath
+            repo = prefs.updateGitHubRepo; mode = prefs.updateGitHubMode; branch = prefs.updateBranch
+        }
+    }
+    private var checkedSource: Source?
+    private var checkedPackage: URL?
+    private var previousBundle: URL?
+    private var healthMarker: URL { supportDir.appendingPathComponent("update-pending") }
+    private var recoveryMessage: URL { supportDir.appendingPathComponent("update-result") }
+
+    func acknowledgeLaunch() {
+        // Called after the menu, settings host and monitoring have initialized.
+        if let data = try? Data(contentsOf: healthMarker), let path = String(data: data, encoding: .utf8),
+           path.contains(".KillBill-previous-") {
+            try? FileManager.default.removeItem(atPath: path)
+        }
+        try? FileManager.default.removeItem(at: healthMarker)
+        if let data = try? Data(contentsOf: recoveryMessage), let message = String(data: data, encoding: .utf8) {
+            statusLine = message
+            try? FileManager.default.removeItem(at: recoveryMessage)
+        }
+    }
 
     private var currentBundlePath: String { Bundle.main.bundlePath }
 
@@ -90,12 +125,7 @@ final class UpdateManager: ObservableObject {
     }
 
     private static func decodeVersion(_ data: Data) -> UpdateInfo? {
-        guard let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        let version = (obj["surum"] as? String) ?? (obj["version"] as? String)
-        guard let version, !version.isEmpty else { return nil }
-        return UpdateInfo(version: version,
-                          date: obj["tarih"] as? String ?? "",
-                          note: obj["not"] as? String ?? "")
+        try? UpdateValidation.version(data)
     }
 
     // MARK: - Kaynak yapılandırması
@@ -103,7 +133,7 @@ final class UpdateManager: ObservableObject {
     private var prefs: PreferencesManager { .shared }
 
     private var githubRepo: String {
-        prefs.updateGitHubRepo.trimmingCharacters(in: .whitespacesAndNewlines)
+        (checkedSource?.repo ?? prefs.updateGitHubRepo).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// "owner/repo" ya da tam URL kabul eder.
@@ -123,7 +153,7 @@ final class UpdateManager: ObservableObject {
     }
 
     private func localSourceURL() throws -> URL {
-        var path = prefs.updateLocalPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        var path = (checkedSource?.path ?? prefs.updateLocalPath).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !path.isEmpty else {
             throw UpdateError.message("Yerel kaynak klasörü seçilmedi.")
         }
@@ -152,10 +182,30 @@ final class UpdateManager: ObservableObject {
 
     private func githubToken() -> String? {
         if let env = ProcessInfo.processInfo.environment["KILLBILL_GH_TOKEN"], !env.isEmpty { return env }
-        guard let data = try? Data(contentsOf: tokenFile),
-              let str = String(data: data, encoding: .utf8) else { return nil }
+        var item: CFTypeRef?
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "com.benkays.killbill.github", kSecAttrAccount as String: "update",
+            kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data, let str = String(data: data, encoding: .utf8) else { return nil }
         let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    func saveGitHubToken(_ value: String) {
+        let token = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "com.benkays.killbill.github", kSecAttrAccount as String: "update"]
+        let status: OSStatus
+        if token.isEmpty { status = SecItemDelete(query as CFDictionary) }
+        else {
+            let attributes = [kSecValueData as String: Data(token.utf8)]
+            let result = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+            if result == errSecItemNotFound {
+                status = SecItemAdd(query.merging(attributes) { _, new in new } as CFDictionary, nil)
+            } else { status = result }
+        }
+        statusLine = (status == errSecSuccess || status == errSecItemNotFound) ? "GitHub anahtarı Anahtar Zinciri'nde güncellendi." : "Anahtar Zinciri güncellenemedi (\(status))."
     }
 
     // MARK: - Kontrol
@@ -163,6 +213,8 @@ final class UpdateManager: ObservableObject {
     func checkForUpdates() {
         guard !isChecking, !isUpdating else { return }
         isChecking = true
+        checkedSource = Source(prefs)
+        checkedPackage = nil
         available = nil
         statusLine = "Kontrol ediliyor…"
 
@@ -194,9 +246,12 @@ final class UpdateManager: ObservableObject {
 
     /// Yayınlanan sürümü okur (yerel dosya ya da HTTPS).
     private func fetchRemoteVersion() throws -> UpdateInfo {
-        switch prefs.updateSourceKind {
+        guard let source = checkedSource else { throw UpdateError.message("Önce güncellemeleri kontrol edin.") }
+        switch source.kind {
         case .local:
             let dir = try localSourceURL()
+            let zip = dir.appendingPathComponent("KillBill.zip")
+            checkedPackage = FileManager.default.fileExists(atPath: zip.path) ? zip : dir.appendingPathComponent("KillBill.app")
             let data = try Data(contentsOf: dir.appendingPathComponent("version.json"))
             guard let info = UpdateManager.decodeVersion(data) else {
                 throw UpdateError.message("version.json okunamadı ya da geçersiz.")
@@ -205,11 +260,12 @@ final class UpdateManager: ObservableObject {
 
         case .github:
             let repo = try normalizedRepo()
-            switch prefs.updateGitHubMode {
+            switch source.mode {
             case .branch:
-                let branch = prefs.updateBranch.trimmingCharacters(in: .whitespacesAndNewlines)
+                let branch = source.branch.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !branch.isEmpty else { throw UpdateError.message("Dal adı boş olamaz.") }
                 let raw = "https://raw.githubusercontent.com/\(repo)/\(branch)/version.json"
+                checkedPackage = URL(string: "https://raw.githubusercontent.com/\(repo)/\(branch)/dist/KillBill.zip")
                 let data = try UpdateManager.httpsData(raw)
                 guard let info = UpdateManager.decodeVersion(data) else {
                     throw UpdateError.message("Depodaki version.json geçersiz.")
@@ -217,16 +273,14 @@ final class UpdateManager: ObservableObject {
                 return info
             case .release:
                 let release = try fetchLatestRelease(repo: repo)
+                guard let package = release.assets.first(where: { $0.name == "KillBill.zip" }), package.size > 0, package.size <= UpdateValidation.maxBytes,
+                      let packageURL = URL(string: package.url) else { throw UpdateError.message("Release içinde geçerli KillBill.zip bulunamadı.") }
+                checkedPackage = packageURL
                 if let versionAsset = release.assets.first(where: { $0.name == "version.json" }) {
                     let data = try UpdateManager.httpsData(versionAsset.url)
                     if let info = UpdateManager.decodeVersion(data) { return info }
                 }
-                // version.json varlığı yoksa etiketi sürüm kabul et
-                let tagVersion = release.tag.replacingOccurrences(of: "v", with: "", options: .anchored)
-                guard !tagVersion.isEmpty else {
-                    throw UpdateError.message("Release bulundu ama sürüm etiketi okunamadı.\nRelease'e version.json ekleyin.")
-                }
-                return UpdateInfo(version: tagVersion, date: "", note: release.name)
+                throw UpdateError.message("Release içinde geçerli version.json bulunamadı.")
             }
         }
     }
@@ -258,7 +312,7 @@ final class UpdateManager: ObservableObject {
         let name = obj["name"] as? String ?? ""
         let assets = (obj["assets"] as? [[String: Any]] ?? []).compactMap { a -> ReleaseAsset? in
             guard let n = a["name"] as? String,
-                  let u = a["browser_download_url"] as? String else { return nil }
+                  let u = a[self.githubToken() == nil ? "browser_download_url" : "url"] as? String else { return nil }
             return ReleaseAsset(name: n, url: u, size: a["size"] as? Int ?? 0)
         }
         return Release(tag: tag, name: name, assets: assets)
@@ -276,6 +330,7 @@ final class UpdateManager: ObservableObject {
         var request = URLRequest(url: url)
         request.timeoutInterval = 25
         request.setValue("KillBill-Updater", forHTTPHeaderField: "User-Agent")
+        if url.path.contains("/releases/assets/") { request.setValue("application/octet-stream", forHTTPHeaderField: "Accept") }
         if url.host == "api.github.com" || url.host == "raw.githubusercontent.com" {
             if let token = UpdateManager.shared.githubToken() {
                 request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -284,7 +339,9 @@ final class UpdateManager: ObservableObject {
 
         var result: Result<(Data, Int), Error>!
         let semaphore = DispatchSemaphore(value: 0)
-        URLSession.shared.dataTask(with: request) { data, response, error in
+        let session = URLSession(configuration: .ephemeral, delegate: HTTPSOnlyDelegate(), delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+        session.dataTask(with: request) { data, response, error in
             defer { semaphore.signal() }
             if let error { result = .failure(error); return }
             guard let http = response as? HTTPURLResponse else {
@@ -297,6 +354,7 @@ final class UpdateManager: ObservableObject {
         guard (200..<300).contains(status) else {
             throw UpdateError.message(UpdateManager.describe(status: status, url: urlString, body: data))
         }
+        guard data.count <= 2 * 1024 * 1024 else { throw UpdateError.message("Güncelleme bilgisi beklenenden büyük.") }
         return (data, status)
     }
 
@@ -351,6 +409,11 @@ final class UpdateManager: ObservableObject {
 
     func performUpdate() {
         guard let info = available, !isUpdating, !isChecking else { return }
+        guard checkedSource == Source(prefs), checkedPackage != nil else {
+            available = nil
+            statusLine = "Kaynak değişti. Güncellemeleri yeniden kontrol edin."
+            return
+        }
         guard isRunningFromBundle else {
             statusLine = "Güncelleme yalnızca .app paketi olarak çalışırken yapılabilir."
             return
@@ -360,12 +423,13 @@ final class UpdateManager: ObservableObject {
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
+            defer {
+                if let temp = self.lastTempRoot { try? FileManager.default.removeItem(at: temp) }
+                self.lastTempRoot = nil
+            }
             do {
+                try self.createBackup()
                 let package = try self.obtainPackage(expected: info)
-                defer {
-                    if let temp = self.lastTempRoot { try? FileManager.default.removeItem(at: temp) }
-                    self.lastTempRoot = nil
-                }
                 try self.install(package: package, expected: info)
                 DispatchQueue.main.async {
                     self.isUpdating = false
@@ -391,20 +455,17 @@ final class UpdateManager: ObservableObject {
         let zipURL = tempRoot.appendingPathComponent("KillBill.zip")
         var bundleCandidate: URL?
 
-        switch prefs.updateSourceKind {
+        guard let source = checkedSource, let location = checkedPackage else { throw UpdateError.message("Kontrol edilmiş paket bulunamadı.") }
+        switch source.kind {
         case .local:
-            let dir = try localSourceURL()
-            let localZip = dir.appendingPathComponent("KillBill.zip")
-            let localApp = dir.appendingPathComponent("KillBill.app")
-            if FileManager.default.fileExists(atPath: localZip.path) {
-                try FileManager.default.copyItem(at: localZip, to: zipURL)
-            } else if FileManager.default.fileExists(atPath: localApp.path) {
-                bundleCandidate = try extractAppFromDirectory(localApp, into: tempRoot)
+            if location.pathExtension == "zip" {
+                try FileManager.default.copyItem(at: location, to: zipURL)
+            } else {
+                bundleCandidate = try extractAppFromDirectory(location, into: tempRoot)
             }
         case .github:
-            let remote = try remotePackageURL()
             note("İndiriliyor…")
-            try download(remote, to: zipURL)
+            try download(location, to: zipURL)
         }
 
         if let bundleCandidate { return bundleCandidate }
@@ -414,36 +475,11 @@ final class UpdateManager: ObservableObject {
         try validateZip(zipURL)
         note("Paket açılıyor…")
         try run("/usr/bin/ditto", ["-x", "-k", zipURL.path, extracted.path])
-        guard let app = findApp(in: extracted) else {
+        let app = extracted.appendingPathComponent("KillBill.app", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: app.path) else {
             throw UpdateError.message("Paket içinde KillBill.app bulunamadı.")
         }
         return app
-    }
-
-    private func remotePackageURL() throws -> URL {
-        switch prefs.updateGitHubMode {
-        case .branch:
-            let repo = try normalizedRepo()
-            let branch = prefs.updateBranch.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard let url = URL(string: "https://raw.githubusercontent.com/\(repo)/\(branch)/dist/KillBill.zip") else {
-                throw UpdateError.message("İndirme adresi oluşturulamadı.")
-            }
-            return url
-        case .release:
-            let repo = try normalizedRepo()
-            let release = try fetchLatestRelease(repo: repo)
-            guard let asset = release.assets.first(where: { $0.name.lowercased() == "killbill.zip" })
-                ?? release.assets.first(where: { $0.name.lowercased().hasSuffix(".zip") }) else {
-                throw UpdateError.message("Release içinde KillBill.zip bulunamadı.")
-            }
-            guard asset.size <= 300 * 1024 * 1024 else {
-                throw UpdateError.message("Paket beklenenden büyük (\(asset.size) bayt).")
-            }
-            guard let url = URL(string: asset.url) else {
-                throw UpdateError.message("İndirme adresi geçersiz.")
-            }
-            return url
-        }
     }
 
     private func download(_ url: URL, to destination: URL) throws {
@@ -456,13 +492,16 @@ final class UpdateManager: ObservableObject {
         var request = URLRequest(url: url)
         request.timeoutInterval = 60
         request.setValue("KillBill-Updater", forHTTPHeaderField: "User-Agent")
+        if url.path.contains("/releases/assets/") { request.setValue("application/octet-stream", forHTTPHeaderField: "Accept") }
         if let token = githubToken(), url.host == "api.github.com" || url.host == "raw.githubusercontent.com" {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
         let semaphore = DispatchSemaphore(value: 0)
         var failure: Error?
-        let task = URLSession.shared.downloadTask(with: request) { tmp, response, error in
+        let session = URLSession(configuration: .ephemeral, delegate: HTTPSOnlyDelegate(), delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+        let task = session.downloadTask(with: request) { tmp, response, error in
             defer { semaphore.signal() }
             if let error { failure = error; return }
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
@@ -491,17 +530,9 @@ final class UpdateManager: ObservableObject {
 
     /// Zip-slip koruması: mutlak yol ve `..` içeren girdiler reddedilir.
     private func validateZip(_ zip: URL) throws {
-        let listing = try runCapturing("/usr/bin/unzip", ["-Z1", zip.path])
-        let entries = listing.split(separator: "\n").map(String.init)
-        guard !entries.isEmpty else { throw UpdateError.message("Paket boş ya da bozuk.") }
-        for entry in entries {
-            if entry.hasPrefix("/") || entry.contains("..") {
-                throw UpdateError.message("Güvenlik: paket içinde geçersiz yol var (\(entry)).")
-            }
-        }
-        guard entries.contains(where: { $0.contains("KillBill.app/") }) else {
-            throw UpdateError.message("Paket içinde KillBill.app yok.")
-        }
+        let size = try FileManager.default.attributesOfItem(atPath: zip.path)[.size] as? Int ?? 0
+        guard size > 0, size <= UpdateValidation.maxBytes else { throw UpdateError.message("Paket boyutu geçersiz.") }
+        try UpdateValidation.archive(Data(contentsOf: zip, options: .mappedIfSafe))
     }
 
     private func extractAppFromDirectory(_ app: URL, into root: URL) throws -> URL {
@@ -511,72 +542,70 @@ final class UpdateManager: ObservableObject {
         return dest
     }
 
-    private func findApp(in dir: URL) -> URL? {
-        guard let enumerator = FileManager.default.enumerator(at: dir, includingPropertiesForKeys: nil) else { return nil }
-        for case let url as URL in enumerator where url.pathExtension == "app" {
-            return url
-        }
-        return nil
-    }
-
-    /// Yedek al → paketi yerleştir → hata olursa geri al.
-    private func install(package: URL, expected: UpdateInfo) throws {
+    private func createBackup() throws {
         let fm = FileManager.default
-        let target = URL(fileURLWithPath: currentBundlePath)
-        let installedID = Bundle(path: package.path)?.bundleIdentifier
-        guard installedID == Bundle.main.bundleIdentifier else {
-            throw UpdateError.message("Paket farklı bir uygulama içeriyor (\(installedID ?? "kimlik yok")).")
-        }
-        // Paketin kendi sürümü bildirilenle aynı mı?
-        if let infoURL = Bundle(path: package.path)?.url(forResource: "version", withExtension: "json"),
-           let data = try? Data(contentsOf: infoURL),
-           let info = UpdateManager.decodeVersion(data),
-           UpdateManager.compare(info.version, expected.version) != 0 {
-            throw UpdateError.message("Paket sürümü (\(info.version)) bildirilenle (\(expected.version)) uyuşmuyor.")
-        }
-
         try fm.createDirectory(at: backupsDir, withIntermediateDirectories: true)
         let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
-        let backupZip = backupsDir.appendingPathComponent("KillBill-\(currentVersion)-\(stamp).zip")
-
+        let backup = backupsDir.appendingPathComponent("KillBill-\(currentVersion)-\(stamp).zip")
         note("Yedek alınıyor…")
-        try run("/usr/bin/ditto", ["-c", "-k", "--keepParent", target.path, backupZip.path])
+        try run("/usr/bin/ditto", ["-c", "-k", "--keepParent", currentBundlePath, backup.path])
+        let size = try fm.attributesOfItem(atPath: backup.path)[.size] as? Int ?? 0
+        guard size > 0 else { throw UpdateError.message("Yedek oluşturulamadı; güncelleme yazılmadı.") }
+        lastBackup = backup
+    }
+    private var lastBackup: URL?
 
-        let staging = supportDir.appendingPathComponent("Staging", isDirectory: true)
-        try? fm.removeItem(at: staging)
-        try fm.createDirectory(at: staging, withIntermediateDirectories: true)
-        let oldCopy = staging.appendingPathComponent("old.app", isDirectory: true)
+    /// Doğrula → yerinde hazırla → değiştir; hata olursa geri al.
+    private func install(package: URL, expected: UpdateInfo) throws {
+        let target = URL(fileURLWithPath: currentBundlePath)
+        note("Paket doğrulanıyor…")
+        try UpdateValidation.bundle(package, expected: expected, installed: target, remote: checkedSource?.kind == .github)
 
-        var movedOld = false
+        note("Dosyalar yazılıyor…")
+        let previous: URL
         do {
-            note("Dosyalar yazılıyor…")
-            // Kendi paketini taşımak çalışan süreç için güvenlidir; yeni paket aynı yola konur.
-            try fm.moveItem(at: target, to: oldCopy)
-            movedOld = true
-            try fm.copyItem(at: package, to: target)
-            // Karantina damgası varsa temizle
+            previous = try BundleInstaller.replace(target: target, candidate: package)
             try? run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", target.path])
         } catch {
-            if movedOld {
-                try? fm.removeItem(at: target)
-                try? fm.moveItem(at: oldCopy, to: target)
-            }
-            throw UpdateError.message("Yazma başarısız, eski sürüm geri kondu. Yedek: \(backupZip.path)")
+            throw UpdateError.message("Yazma başarısız; önceki sürüm korundu. Yedek: \(lastBackup?.path ?? "yok")")
         }
-
-        try? fm.removeItem(at: oldCopy)
-        try? fm.removeItem(at: staging)
-        statusLine = "Güncellendi. Yedek: \(backupZip.path)"
+        previousBundle = previous
+        try Data(previous.path.utf8).write(to: healthMarker)
+        note("Sürüm \(expected.version) yazıldı. Yedek: \(lastBackup?.path ?? "yok")")
     }
 
     private func relaunch() {
         let path = currentBundlePath
         guard path.hasSuffix(".app") else { NSApp.terminate(nil); return }
+        guard let previous = previousBundle else {
+            statusLine = "Yeni sürüm açılamadı ve önceki sürüm izlenemedi. Yedek: \(lastBackup?.path ?? "yok")"
+            return
+        }
+        let oldPID = String(ProcessInfo.processInfo.processIdentifier)
+        let script = """
+        /usr/bin/open -n "$1"
+        i=0
+        while [ $i -lt 30 ]; do
+          /bin/sleep 0.5
+          if /bin/kill -0 "$4" 2>/dev/null; then i=$((i+1)); continue; fi
+          if /usr/bin/pgrep -f "$1/Contents/MacOS/KillBill" >/dev/null 2>&1; then exit 0; fi
+          i=$((i+1))
+        done
+        /bin/mv "$1" "$1.failed-$(/bin/date +%s)" 2>/dev/null
+        /bin/mv "$2" "$1" 2>/dev/null && /usr/bin/open -n "$1"
+        /bin/rm -f "$3"
+        /usr/bin/printf 'Güncelleme açılmadı; önceki sürüm geri yüklendi.' > "$5"
+        """
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/sh")
-        p.arguments = ["-c", "sleep 1.2; /usr/bin/open -n \"\(path)\""]
-        try? p.run()
-        NSApp.terminate(nil)
+        p.arguments = ["-c", script, "killbill-update", path, previous.path, healthMarker.path, oldPID, recoveryMessage.path]
+        do {
+            try p.run()
+            NSApp.terminate(nil)
+        } catch {
+            try? FileManager.default.removeItem(at: healthMarker)
+            statusLine = "Yeniden başlatma başlatılamadı: \(error.localizedDescription)"
+        }
     }
 
     // MARK: - Süreç yardımcıları
@@ -621,4 +650,14 @@ final class UpdateManager: ObservableObject {
 // İlerleme satırını ana iş parçacığından güncelleyen küçük yardımcı.
 private func note(_ text: String) {
     DispatchQueue.main.async { UpdateManager.shared.setProgress(text) }
+}
+
+/// Yönlendirmelerde de HTTPS zorunluluğunu korur.
+final class HTTPSOnlyDelegate: NSObject, URLSessionTaskDelegate {
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(request.url?.scheme == "https" ? request : nil)
+    }
 }

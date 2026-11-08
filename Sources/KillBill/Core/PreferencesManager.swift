@@ -35,7 +35,7 @@ enum InactiveUnit: String, CaseIterable, Identifiable {
 }
 
 struct ShortcutCombo: Equatable {
-    var keyCode: UInt32 = 0
+    var keyCode: UInt32 = UInt32.max
     var modifiers: UInt32 = 0
     var enabled: Bool = true
 
@@ -56,7 +56,20 @@ struct ShortcutCombo: Equatable {
 final class PreferencesManager: ObservableObject {
     static let shared = PreferencesManager()
 
-    private let d = UserDefaults.standard
+    private let d: UserDefaults
+    @Published private(set) var loginStatus = ""
+    @Published var protectedApps: [String: String] { didSet { d.set(protectedApps, forKey: "protectedApps") } }
+
+    func isProtected(_ entry: AppEntry) -> Bool {
+        guard let id = entry.bundleID else { return false }
+        return protectedApps[id] != nil
+    }
+
+    func toggleProtection(_ entry: AppEntry) {
+        guard let id = entry.bundleID else { return }
+        if protectedApps[id] != nil { protectedApps.removeValue(forKey: id) }
+        else { protectedApps[id] = entry.name }
+    }
 
     // QuitAll UserDefaults anahtarları
     private enum Key {
@@ -118,15 +131,17 @@ final class PreferencesManager: ObservableObject {
     @Published var shortcutQuit: ShortcutCombo      { didSet { saveShortcut(.quitAll) } }
     @Published var shortcutForceQuit: ShortcutCombo { didSet { saveShortcut(.forceQuitAll) } }
 
-    private init() {
+    init(defaults: UserDefaults = .standard) {
+        d = defaults
+        protectedApps = d.dictionary(forKey: "protectedApps") as? [String: String] ?? [:]
         playSounds           = d.object(forKey: Key.playSound) as? Bool ?? true
         groupBackgroundApps  = d.object(forKey: Key.groupBackgroundApps) as? Bool ?? true
         showBackgroundApps   = d.object(forKey: Key.showBackgroundApps) as? Bool ?? false
         deselectApps         = d.object(forKey: Key.deselectApps) as? Bool ?? false
         disableTips          = d.object(forKey: Key.disableTips) as? Bool ?? false
 
-        let qo = d.string(forKey: Key.quitOption) ?? QuitOption.force.rawValue
-        quitOption = QuitOption(rawValue: qo) ?? .force
+        let qo = d.string(forKey: Key.quitOption) ?? QuitOption.normal.rawValue
+        quitOption = QuitOption(rawValue: qo) ?? .normal
 
         let so = d.string(forKey: Key.menuAppsSort) ?? AppsSort.cpuUsage.rawValue
         sortOption = AppsSort(rawValue: so) ?? .cpuUsage
@@ -136,7 +151,7 @@ final class PreferencesManager: ObservableObject {
         useSystemColor      = d.object(forKey: Key.useSystemColor) as? Bool ?? true
         statusIconStyle     = StatusIconStyle(rawValue: d.string(forKey: Key.statusIconStyle) ?? "") ?? .ringSlash
         updateSourceKind    = UpdateSourceKind(rawValue: d.string(forKey: Key.updateSourceKind) ?? "") ?? .github
-        updateLocalPath     = d.string(forKey: Key.updateLocalPath) ?? NSHomeDirectory() + "/Desktop/Dev_Folder/KillBill"
+        updateLocalPath     = d.string(forKey: Key.updateLocalPath) ?? ""
         updateGitHubRepo    = d.string(forKey: Key.updateGitHubRepo) ?? "BeNKaYS/KillBill"
         updateGitHubMode    = GitHubUpdateMode(rawValue: d.string(forKey: Key.updateGitHubMode) ?? "") ?? .release
         updateBranch        = d.string(forKey: Key.updateBranch) ?? "main"
@@ -175,17 +190,22 @@ final class PreferencesManager: ObservableObject {
         showBackgroundApps = false
         deselectApps = false
         disableTips = false
-        quitOption = .force
+        quitOption = .normal
         sortOption = .cpuUsage
         includeFinderInList = false
         includeTrashInList = false
         statusIconStyle = .ringSlash
         updateSourceKind = .github
+        updateLocalPath = ""
+        updateGitHubRepo = "BeNKaYS/KillBill"
+        updateGitHubMode = .release
+        updateBranch = "main"
+        useSystemColor = true
         autoQuitEnabled = false; autoQuitMinutes = 15; autoQuitUnit = .minute
         shortcutActivateEnabled = true;  shortcutQuitEnabled = true;  shortcutForceQuitEnabled = true
-        shortcutActivate =  ShortcutCombo(keyCode: 0, modifiers: 0, enabled: true)
-        shortcutQuit =      ShortcutCombo(keyCode: 0, modifiers: 0, enabled: true)
-        shortcutForceQuit = ShortcutCombo(keyCode: 0, modifiers: 0, enabled: true)
+        shortcutActivate = ShortcutCombo()
+        shortcutQuit = ShortcutCombo()
+        shortcutForceQuit = ShortcutCombo()
     }
 
     // MARK: Login item
@@ -194,8 +214,14 @@ final class PreferencesManager: ObservableObject {
             do {
                 if openAtLogin { try SMAppService.mainApp.register() }
                 else { try SMAppService.mainApp.unregister() }
+                loginStatus = SMAppService.mainApp.status == .requiresApproval
+                    ? "Sistem Ayarları → Genel → Giriş Öğeleri bölümünden onaylayın." : ""
             } catch {
-                NSLog("KillBill: launch at login değiştirilemedi: \(error.localizedDescription)")
+                loginStatus = "Açılışta başlatma değiştirilemedi: \(error.localizedDescription)"
+                DispatchQueue.main.async {
+                    let actual = Self.currentLoginItemEnabled()
+                    if self.openAtLogin != actual { self.openAtLogin = actual }
+                }
             }
         }
     }
@@ -231,8 +257,10 @@ final class PreferencesManager: ObservableObject {
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return (ShortcutCombo(), true)
         }
-        let keyCode = UInt32(obj["keyCode"] as? Int ?? 0)
-        let mods = UInt32(obj["modifiers"] as? Int ?? 0)
+        let rawKey = obj["keyCode"] as? Int ?? Int(UInt32.max)
+        let rawMods = obj["modifiers"] as? Int ?? 0
+        let mods = UInt32(exactly: rawMods) ?? 0
+        let keyCode = (rawKey == 0 && mods == 0) ? UInt32.max : (UInt32(exactly: rawKey) ?? UInt32.max)
         let enabled = obj["enabled"] as? Bool ?? true
         return (ShortcutCombo(keyCode: keyCode, modifiers: mods, enabled: enabled), enabled)
     }
