@@ -9,7 +9,7 @@ extension NSApplication {
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private var prefsWindow: NSWindow?
@@ -38,7 +38,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Popover (panel)
         popover = NSPopover()
-        popover.contentSize = NSSize(width: 320, height: 480)
+        popover.contentSize = NSSize(width: 380, height: 500)
+        popover.delegate = self
         popover.behavior = .transient
         popover.animates = true
         popover.contentViewController = NSHostingController(rootView: MenuPanelView())
@@ -53,6 +54,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // İlk çalıştırma hoş geldin / izin istekleri
         NotificationCenter.default.addObserver(self, selector: #selector(openPreferences),
                                                name: .openPreferencesRequested, object: nil)
+
+        // Yeni sürüm sağlıklı açıldıysa önceki kopyayı temizle.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            UpdateManager.shared.acknowledgeLaunch()
+        }
 
         eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             if self?.popover.isShown == true { self?.closePopover() }
@@ -89,12 +95,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func showPopover() {
         guard let button = statusItem.button else { return }
         RunningAppsManager.shared.refresh()
+        RunningAppsManager.shared.setPanelVisible(true)
         NSApp.bringForward()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
     }
 
     func closePopover() { popover.performClose(nil) }
+    func popoverDidClose(_ notification: Notification) { RunningAppsManager.shared.setPanelVisible(false) }
 
     // MARK: Tercihler penceresi
     @objc func openPreferences() {
@@ -105,8 +113,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 620),
-            styleMask: [.titled, .closable, .miniaturizable],
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 620),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false)
         window.title = "KillBill"
         window.contentViewController = NSHostingController(rootView: PreferencesView())

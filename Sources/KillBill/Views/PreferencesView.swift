@@ -3,19 +3,21 @@ import AppKit
 
 struct PreferencesView: View {
     enum Tab: String, CaseIterable, Identifiable {
-        case general, updates, shortcuts, developer
+        case general, closing, shortcuts, updates, developer
         var id: String { rawValue }
         var title: String {
             switch self {
             case .general: return "Genel"
+            case .closing: return "Kapatma"
             case .updates: return "Güncelleme"
             case .shortcuts: return "Kısayollar"
-            case .developer: return "Geliştirici"
+            case .developer: return "Hakkında"
             }
         }
         var symbol: String {
             switch self {
             case .general: return "gearshape"
+            case .closing: return "power"
             case .updates: return "arrow.triangle.2.circlepath"
             case .shortcuts: return "command"
             case .developer: return "person.crop.circle"
@@ -23,8 +25,9 @@ struct PreferencesView: View {
         }
     }
 
-    private var tab = State(initialValue: Tab.general)
-    private let accent = Color(red: 0.996, green: 0.737, blue: 0.200)
+    @ViewState private var tab = Tab.general
+    @ObservedObject private var prefs = PreferencesManager.shared
+    private var accent: Color { prefs.useSystemColor ? .accentColor : Color(red: 0.996, green: 0.737, blue: 0.200) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -32,8 +35,9 @@ struct PreferencesView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    switch tab.wrappedValue {
+                    switch tab {
                     case .general: GeneralTab(accent: accent)
+                    case .closing: ClosingTab()
                     case .updates: UpdatesTab(accent: accent)
                     case .shortcuts: ShortcutsTab(accent: accent)
                     case .developer: DeveloperTab()
@@ -43,21 +47,21 @@ struct PreferencesView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .frame(minWidth: 420, minHeight: 560)
+        .frame(minWidth: 520, minHeight: 520)
     }
 
     private var tabBar: some View {
         HStack(spacing: 6) {
             ForEach(Tab.allCases) { t in
-                Button(action: { tab.wrappedValue = t }) {
+                Button(action: { tab = t }) {
                     VStack(spacing: 3) {
                         Image(systemName: t.symbol).font(.system(size: 17, weight: .semibold))
                         Text(t.title).font(.system(size: 10.5, weight: .medium))
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
-                    .foregroundColor(tab.wrappedValue == t ? accent : .secondary)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(tab.wrappedValue == t ? Color.primary.opacity(0.07) : .clear))
+                    .foregroundColor(tab == t ? accent : .secondary)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(tab == t ? Color.primary.opacity(0.07) : .clear))
                 }
                 .buttonStyle(.plain)
             }
@@ -104,18 +108,20 @@ private struct PrefToggle: View {
 private struct GeneralTab: View {
     let accent: Color
     @ObservedObject var prefs = PreferencesManager.shared
+    @ViewState private var resetting = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             SectionTitle(text: "Başlangıç:")
             PrefToggle(title: "Açılışta başlat", isOn: $prefs.openAtLogin, tip: "KillBill'i oturum açılışında başlat.")
+            if !prefs.loginStatus.isEmpty { Text(prefs.loginStatus).font(.caption).foregroundColor(.orange) }
 
             SectionTitle(text: "Menü çubuğu:")
             statusIconPicker
             Text("Seçili simge: \(prefs.statusIconStyle.label)")
                 .font(.system(size: 11)).foregroundColor(.secondary)
 
-            SectionTitle(text: "Eğlence:")
+            SectionTitle(text: "Görünüm ve ses:")
             PrefToggle(title: "Sesleri çal", isOn: $prefs.playSounds,
                        tip: "Uygulamalar kapatılırken tatmin edici bir ses çalar.")
             PrefToggle(title: "Varsayılan sistem rengini kullan", isOn: $prefs.useSystemColor,
@@ -128,22 +134,9 @@ private struct GeneralTab: View {
                        tip: "Aynı arka plan uygulamasının birden çok kopyasını tek satırda grupla.")
             PrefToggle(title: "Uygulamaları varsayılan olarak seçme", isOn: $prefs.deselectApps)
 
-            HStack(spacing: 8) {
-                Toggle("Şu süreden sonra hareketsiz uygulamaları kapat", isOn: $prefs.autoQuitEnabled)
-                    .toggleStyle(.checkbox).font(.system(size: 12.5))
-                TextField("", value: $prefs.autoQuitMinutes, format: .number)
-                    .frame(width: 44).textFieldStyle(.roundedBorder)
-                    .disabled(!prefs.autoQuitEnabled)
-                Picker("", selection: $prefs.autoQuitUnit) {
-                    ForEach(InactiveUnit.allCases) { Text($0.label).tag($0) }
-                }
-                .labelsHidden().frame(width: 84).disabled(!prefs.autoQuitEnabled)
-                HelpBadge(tip: "Hareketsiz uygulamaları belirli bir süre sonra otomatik kapat.")
-            }
-
             PrefToggle(title: "Kapatma ipuçlarını kapat", isOn: $prefs.disableTips)
             PrefToggle(title: "Finder'ı listeye dahil et", isOn: $prefs.includeFinderInList)
-            PrefToggle(title: "Çöp Kutusu'nu listeye dahil et", isOn: $prefs.includeTrashInList)
+            PrefToggle(title: "Menüde Çöp Kutusunu Boşalt eylemini göster", isOn: $prefs.includeTrashInList)
 
             Divider().padding(.vertical, 2)
 
@@ -157,22 +150,19 @@ private struct GeneralTab: View {
             }
 
             HStack {
-                Text("Varsayılan:").font(.system(size: 12.5))
-                Picker("", selection: $prefs.quitOption) {
-                    ForEach(QuitOption.allCases) { Text($0.label).tag($0) }
-                }.labelsHidden().frame(width: 150)
-                HelpBadge(tip: "Varsayılan kapatma davranışı: Normal ya da Zorla kapat.")
-                Spacer()
-            }
-
-            HStack {
                 Text("Sıfırla:").font(.system(size: 12.5))
-                Button("Tümünü sıfırla") { prefs.resetAll() }
+                Button("Tercihleri sıfırla…") { resetting = true }
                 Spacer()
             }
 
             Divider().padding(.vertical, 2)
             PermissionsSection(accent: accent)
+        }
+        .alert("Tercihler sıfırlansın mı?", isPresented: $resetting) {
+            Button("Vazgeç", role: .cancel) {}
+            Button("Sıfırla", role: .destructive) { prefs.resetAll() }
+        } message: {
+            Text("Görünüm, kapatma, kısayol ve güncelleme tercihleri sıfırlanır. Korunan uygulamalar ve açılışta başlatma ayarı korunur.")
         }
     }
 
@@ -253,9 +243,12 @@ private struct PermissionsSection: View {
 private struct ShortcutsTab: View {
     let accent: Color
     @ObservedObject var prefs = PreferencesManager.shared
+    @ObservedObject private var hotkeys = HotkeyManager.shared
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
+            Text("Kısayola tıklayıp Command, Option veya Control ile bir tuşa basın. Escape iptal eder, Delete siler.").font(.caption).foregroundColor(.secondary)
+            if !hotkeys.statusMessage.isEmpty { Text(hotkeys.statusMessage).foregroundColor(.orange).font(.caption) }
             shortcutRow("Menüyü aç:", enabled: $prefs.shortcutActivateEnabled,
                         combo: $prefs.shortcutActivate)
             shortcutRow("Tümünü kapat:", enabled: $prefs.shortcutQuitEnabled,
@@ -280,7 +273,7 @@ private struct ShortcutsTab: View {
                 .frame(width: 150, height: 24)
                 .disabled(!enabled.wrappedValue)
             Button {
-                combo.wrappedValue = ShortcutCombo(keyCode: 0, modifiers: 0, enabled: enabled.wrappedValue)
+                combo.wrappedValue = ShortcutCombo(enabled: enabled.wrappedValue)
                 HotkeyManager.shared.reload()
             } label: {
                 Image(systemName: "xmark.circle").foregroundColor(.secondary)
@@ -298,6 +291,7 @@ private struct UpdatesTab: View {
     let accent: Color
     @ObservedObject var prefs = PreferencesManager.shared
     @ObservedObject var updater = UpdateManager.shared
+    @ViewState private var token = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -320,6 +314,7 @@ private struct UpdatesTab: View {
             .pickerStyle(.segmented)
             .labelsHidden()
 
+            Group {
             switch prefs.updateSourceKind {
             case .local:
                 HStack(spacing: 6) {
@@ -360,7 +355,17 @@ private struct UpdatesTab: View {
                         .font(.system(size: 10.5)).foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                HStack(spacing: 6) {
+                    SecureField("Özel depo anahtarı (isteğe bağlı)", text: $token)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Kaydet") { updater.saveGitHubToken(token); token = "" }
+                        .disabled(token.isEmpty)
+                    HelpBadge(tip: "Anahtar yalnızca macOS Anahtar Zinciri'nde tutulur; ayarlara veya pakete yazılmaz.")
+                }
             }
+
+            }
+            .disabled(updater.isChecking || updater.isUpdating)
 
             Divider()
 
@@ -395,6 +400,9 @@ private struct UpdatesTab: View {
                 Text("Son kontrol: \(last.formatted(date: .omitted, time: .shortened))")
                     .font(.system(size: 10.5)).foregroundColor(.secondary)
             }
+            Text("Yalnızca KillBill.app değiştirilir. Ayarlar, korunan uygulamalar ve yedekler korunur.")
+                .font(.caption).foregroundColor(.secondary)
+            Button("Yedekleri Göster") { updater.showBackups() }
 
             if !updater.isRunningFromBundle {
                 HStack(spacing: 6) {
@@ -426,10 +434,47 @@ private struct UpdatesTab: View {
 // MARK: - Geliştirici (Geliştirici Kartı)
 private struct DeveloperTab: View {
     var body: some View {
-        VStack(spacing: 8) {
-            DeveloperCardView()
-                .frame(height: 560)
-                .clipShape(RoundedRectangle(cornerRadius: 18))
+        VStack(alignment: .leading, spacing: 12) {
+            Text("KillBill").font(.title2.bold())
+            Text("Sürüm \(UpdateManager.shared.currentVersion)").foregroundColor(.secondary)
+            Text("Çalışan uygulamalarınızı tek yerden yönetin. Normal kapatma, korunan uygulamalar ve açık işlem sonuçları.")
+            Divider()
+            Text("Sercan ÖZDEMİR · BeNKaYS").font(.headline)
+            Text("Bilişim Teknolojileri Öğretmeni").foregroundColor(.secondary)
+            Text("Eğitim ve yazılımı birleştiren, algoritmalar ve makine öğrenmesi üzerine projeler geliştiren bir yazılım öğretmeni.")
+            Link("E-posta", destination: URL(string: "mailto:sercanozdemir@yandex.com")!)
+            Link("GitHub", destination: URL(string: "https://github.com/BeNKaYS")!)
+            Link("Destek ve hata bildirimi", destination: URL(string: "https://github.com/BeNKaYS/KillBill/issues")!)
+            Text("Uygulama listesi ve tercihler bu Mac'te kalır. Güncelleme kontrolü yalnızca seçtiğiniz kaynağa bağlanır.")
+                .font(.caption).foregroundColor(.secondary)
+        }
+    }
+}
+
+private struct ClosingTab: View {
+    @ObservedObject private var prefs = PreferencesManager.shared
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Picker("Panelde varsayılan işlem", selection: $prefs.quitOption) {
+                ForEach(QuitOption.allCases) { Text($0.label).tag($0) }
+            }
+            Text("Normal kapatma uygulamaya kaydetme fırsatı verir. Zorla kapatma ayrıca onay ister; kaydedilmemiş değişiklikler kaybolabilir. Normal kapatma kısayolu her zaman normal kapatır.")
+                .font(.callout).foregroundColor(.secondary)
+            Divider()
+            Text("Korunan uygulamalar").font(.headline)
+            Text("Paneldeki kilit simgesiyle ekleyin. Korunan uygulamalar tekli ve toplu kapatma işlemlerinde atlanır.")
+                .font(.callout).foregroundColor(.secondary)
+            if prefs.protectedApps.isEmpty { Text("Henüz korunan uygulama yok.").foregroundColor(.secondary) }
+            ForEach(prefs.protectedApps.keys.sorted(), id: \.self) { id in
+                HStack {
+                    Label(prefs.protectedApps[id] ?? id, systemImage: "lock.fill")
+                    Spacer()
+                    Button("Korumayı kaldır") { prefs.protectedApps.removeValue(forKey: id) }
+                }
+            }
+            Divider()
+            Text("Otomatik kapatma bu sürümde kullanılamıyor. Uygulamalar yalnızca sizin işleminizle kapatılır.")
+                .font(.caption).foregroundColor(.secondary)
         }
     }
 }

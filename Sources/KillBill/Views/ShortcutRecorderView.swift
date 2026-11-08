@@ -56,8 +56,14 @@ struct ShortcutRecorderView: NSViewRepresentable {
 
         override func keyDown(with event: NSEvent) {
             guard recording else { super.keyDown(with: event); return }
-            // Sadece modifier basıldıysa bekle
-            if event.keyCode == 0 { return }
+            if event.keyCode == 53 { recording = false; needsDisplay = true; return }
+            if event.keyCode == 51 || event.keyCode == 117 {
+                recording = false
+                onCapture?(UInt32.max, 0)
+                return
+            }
+            let modifiers = KeyCodeFormatter.carbonModifiers(from: event.modifierFlags)
+            guard modifiers != 0 else { return }
             recording = false
             onCapture?(UInt32(event.keyCode), KeyCodeFormatter.carbonModifiers(from: event.modifierFlags))
             needsDisplay = true
@@ -82,7 +88,7 @@ enum KeyCodeFormatter {
     }
 
     static func string(for combo: ShortcutCombo) -> String {
-        if combo.keyCode == 0 { return "Kayıt yok" }
+        if combo.keyCode == UInt32.max { return "Kayıt yok" }
         var s = ""
         if combo.modifiers & UInt32(controlKey) != 0 { s += "⌃" }
         if combo.modifiers & UInt32(optionKey)  != 0 { s += "⌥" }

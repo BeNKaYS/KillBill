@@ -3,7 +3,8 @@ import Carbon.HIToolbox
 
 // MARK: - Global kısayollar (Carbon RegisterEventHotKey — Accessibility izni gerektirmez)
 
-final class HotkeyManager {
+final class HotkeyManager: ObservableObject {
+    @Published private(set) var statusMessage = ""
     static let shared = HotkeyManager()
 
     enum Action: UInt32 {
@@ -51,14 +52,15 @@ final class HotkeyManager {
 
     @objc func reload() {
         unregisterAll()
+        statusMessage = ""
         let prefs = PreferencesManager.shared
-        if prefs.shortcutActivateEnabled, prefs.shortcutActivate.keyCode != 0 {
+        if prefs.shortcutActivateEnabled, prefs.shortcutActivate.keyCode != UInt32.max {
             register(.activate, combo: prefs.shortcutActivate)
         }
-        if prefs.shortcutQuitEnabled, prefs.shortcutQuit.keyCode != 0 {
+        if prefs.shortcutQuitEnabled, prefs.shortcutQuit.keyCode != UInt32.max {
             register(.quitAll, combo: prefs.shortcutQuit)
         }
-        if prefs.shortcutForceQuitEnabled, prefs.shortcutForceQuit.keyCode != 0 {
+        if prefs.shortcutForceQuitEnabled, prefs.shortcutForceQuit.keyCode != UInt32.max {
             register(.forceQuitAll, combo: prefs.shortcutForceQuit)
         }
     }
@@ -69,7 +71,7 @@ final class HotkeyManager {
         let status = RegisterEventHotKey(UInt32(combo.keyCode), UInt32(combo.modifiers),
                                          hotKeyID, GetApplicationEventTarget(), 0, &ref)
         if status == noErr { refs.append(ref) }
-        else { NSLog("KillBill: kısayol kaydedilemedi (\(action)): \(status)") }
+        else { statusMessage = "\(KeyCodeFormatter.string(for: combo)) kaydedilemedi. Başka bir tuş birleşimi seçin (\(status))." }
     }
 
     private func unregisterAll() {

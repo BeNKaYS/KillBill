@@ -2,238 +2,188 @@ import AppKit
 import SwiftUI
 import Combine
 
-// MARK: - AppKit efekt görünümü (native translusent arka plan)
 struct VisualEffectView: NSViewRepresentable {
     var material: NSVisualEffectView.Material = .popover
     var blending: NSVisualEffectView.BlendingMode = .behindWindow
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let v = NSVisualEffectView()
-        v.material = material
-        v.blendingMode = blending
-        v.state = .active
-        return v
-    }
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
-        nsView.material = material
-        nsView.blendingMode = blending
+    func makeNSView(context: Context) -> NSVisualEffectView { NSVisualEffectView() }
+    func updateNSView(_ view: NSVisualEffectView, context: Context) {
+        view.material = material
+        view.blendingMode = blending
+        view.state = .active
     }
 }
 
-// MARK: - Panel view model
 final class PanelViewModel: ObservableObject {
-    @Published var search: String = ""
+    @Published var search = ""
     @Published var selected: Set<Int32> = []
-    @Published var forceMode: Bool = false
-    @Published var tip: String = TipProvider.random()
-
-    private var cancellables = Set<AnyCancellable>()
+    @Published var forceMode = false
     private var knownPIDs: Set<Int32> = []
+    private var subscriptions = Set<AnyCancellable>()
+    private var flagsMonitor: Any?
 
     init() {
         RunningAppsManager.shared.$apps
             .receive(on: RunLoop.main)
-            .sink { [weak self] apps in self?.syncSelection(apps) }
-            .store(in: &cancellables)
-        syncSelection(RunningAppsManager.shared.apps)
-    }
-
-    private func syncSelection(_ apps: [AppEntry]) {
-        let visible = Set(apps.filter { !$0.isBackground || PreferencesManager.shared.showBackgroundApps }.map(\.id))
-        if PreferencesManager.shared.deselectApps {
-            selected = selected.intersection(visible)
-        } else {
-            selected = selected.intersection(visible).union(visible.subtracting(knownPIDs))
-        }
-        knownPIDs = visible
+            .sink { [weak self] _ in self?.syncSelection() }
+            .store(in: &subscriptions)
+        PreferencesManager.shared.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.syncSelection() }
+            .store(in: &subscriptions)
     }
 
     var rows: [AppEntry] { RunningAppsManager.shared.panelList(search: search) }
+    var eligibleRows: [AppEntry] { rows.filter { !PreferencesManager.shared.isProtected($0) } }
+    var targets: [AppEntry] { eligibleRows.filter { selected.contains($0.id) } }
+    var effectiveForce: Bool { forceMode || PreferencesManager.shared.quitOption == .force }
+    var allSelected: Bool { !eligibleRows.isEmpty && eligibleRows.allSatisfy { selected.contains($0.id) } }
 
-    var allSelected: Bool {
-        let ids = rows.map(\.id)
-        return !ids.isEmpty && ids.allSatisfy { selected.contains($0) }
+    func syncSelection() {
+        let visible = Set(RunningAppsManager.shared.panelList(search: "")
+            .filter { !PreferencesManager.shared.isProtected($0) }.map(\.id))
+        selected.formIntersection(visible)
+        if !PreferencesManager.shared.deselectApps { selected.formUnion(visible.subtracting(knownPIDs)) }
+        knownPIDs = visible
     }
 
     func toggleAll() {
-        let ids = rows.map(\.id)
-        if allSelected { selected.subtract(ids) }
-        else { selected.formUnion(ids) }
+        let ids = eligibleRows.map(\.id)
+        if allSelected { selected.subtract(ids) } else { selected.formUnion(ids) }
     }
 
     func toggle(_ pid: Int32) {
         if selected.contains(pid) { selected.remove(pid) } else { selected.insert(pid) }
     }
 
-    func rotateTip() { tip = TipProvider.random() }
-
-    func quitSelected(force: Bool) {
-        let list = rows.filter { selected.contains($0.id) }
-        _ = QuitService.shared.quit(entries: list, force: force || PreferencesManager.shared.quitOption == .force)
+    func beginObservingKeys() {
+        forceMode = NSEvent.modifierFlags.contains(.option)
+        guard flagsMonitor == nil else { return }
+        flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.forceMode = event.modifierFlags.contains(.option)
+            return event
+        }
     }
+
+    func endObservingKeys() {
+        if let monitor = flagsMonitor { NSEvent.removeMonitor(monitor) }
+        flagsMonitor = nil
+        forceMode = false
+    }
+    deinit { if let monitor = flagsMonitor { NSEvent.removeMonitor(monitor) } }
 }
 
-// MARK: - Dönen ipuçları
-enum TipProvider {
-    static let tips = [
-        "Kapatmakta ısrar et ⚡",
-        "Kazananlar kapatır 🏆",
-        "Kapatma zamanı 👋",
-        "Kapatmaya bağımlı oldum",
-        "Yedi kez düş, sekiz kez kapat",
-        "Kapatmayı hiç bırakma",
-        "Kapatmakta utanç yok",
-        "Kapatıcılar favorimiz",
-        "Burada kazananlar kapatır",
-        "Kapatma güvenli bölgesi",
-        "Kapatmakta başarısızlık yok",
-        "Kapatmak yeni bir başlangıçtır"
-    ]
-    static func random() -> String { tips.randomElement() ?? tips[0] }
-}
-
-// MARK: - Menü çubuğu paneli
 struct MenuPanelView: View {
     @StateObject private var vm = PanelViewModel()
     @ObservedObject private var apps = RunningAppsManager.shared
     @ObservedObject private var prefs = PreferencesManager.shared
-    private let accent = Color(red: 0.996, green: 0.737, blue: 0.200)
+    @ObservedObject private var quit = QuitService.shared
+    private var accent: Color { prefs.useSystemColor ? .accentColor : Color(red: 0.996, green: 0.737, blue: 0.200) }
 
     var body: some View {
-        VStack(spacing: 8) {
-            headerButton
-            searchRow
-            appList
-            footer
-        }
-        .padding(10)
-        .frame(width: 320)
-        .background(VisualEffectView(material: .popover, blending: .behindWindow))
-        .onAppear {
-            RunningAppsManager.shared.refresh()
-            installFlagsMonitor()
-        }
-    }
-
-    // "Tümünü Kapat" butonu
-    private var headerButton: some View {
-        Button(action: {
-            vm.quitSelected(force: false)
-        }) {
-            Text(vm.forceMode ? "Zorla Tümünü Kapat" : "Tümünü Kapat")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(.black.opacity(0.85))
-                .frame(maxWidth: .infinity)
-                .frame(height: 30)
-                .background(accent)
-                .cornerRadius(8)
-        }
-        .buttonStyle(.plain)
-        .help("Seçili uygulamaları kapat. Option tuşuyla Zorla Kapat.")
-    }
-
-    // Seç-all onay kutusu + arama
-    private var searchRow: some View {
-        HStack(spacing: 8) {
-            CheckBox(isOn: Binding(get: { vm.allSelected }, set: { _ in vm.toggleAll() }))
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.secondary)
-                TextField("Ara", text: $vm.search)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12.5))
+        VStack(spacing: 12) {
+            HStack {
+                Text("KillBill").font(.headline)
+                Spacer()
+                Menu {
+                    Picker("Sıralama", selection: $prefs.sortOption) {
+                        ForEach(AppsSort.allCases) { Text($0.label).tag($0) }
+                    }
+                    Toggle("Arka plan uygulamaları", isOn: $prefs.showBackgroundApps)
+                } label: { Image(systemName: "line.3.horizontal.decrease") }
+                .menuStyle(.borderlessButton).fixedSize()
+                .accessibilityLabel("Liste seçenekleri")
             }
-            .padding(.horizontal, 8)
-            .frame(height: 26)
-            .background(Color.primary.opacity(0.08))
-            .cornerRadius(7)
-        }
-    }
-
-    // Uygulama listesi
-    private var appList: some View {
-        ScrollView {
-            LazyVStack(spacing: 1) {
-                ForEach(vm.rows) { entry in
-                    AppRowView(
-                        entry: entry,
-                        isSelected: vm.selected.contains(entry.id),
-                        forceMode: vm.forceMode,
-                        accent: accent,
-                        onToggle: { vm.toggle(entry.id) },
-                        onQuit: { _ = QuitService.shared.quit(entries: [entry], force: vm.forceMode) },
-                        onForceQuit: { _ = QuitService.shared.quit(entries: [entry], force: true) },
-                        onUnhide: { RunningAppsManager.shared.unhide(pid: entry.id) },
-                        onReveal: { reveal(entry) }
-                    )
-                }
-                if vm.rows.isEmpty {
-                    Text("Çalışan uygulama yok")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
-                        .padding(.vertical, 24)
+            HStack(spacing: 8) {
+                CheckBox(isOn: Binding(get: { vm.allSelected }, set: { _ in vm.toggleAll() }))
+                    .accessibilityLabel("Görünen uygulamaların tümünü seç")
+                Image(systemName: "magnifyingglass").foregroundColor(.secondary)
+                TextField("Uygulama ara", text: $vm.search).textFieldStyle(.plain)
+                if !vm.search.isEmpty {
+                    Button { vm.search = "" } label: { Image(systemName: "xmark.circle.fill") }
+                        .buttonStyle(.plain).accessibilityLabel("Aramayı temizle")
                 }
             }
-            .padding(.vertical, 2)
-        }
-        .frame(maxHeight: 320)
-    }
+            .padding(8).background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
 
-    // Alt bilgi
-    private var footer: some View {
-        HStack {
-            Text(vm.tip)
-                .font(.system(size: 11.5))
-                .foregroundColor(.secondary)
-                .lineLimit(1)
-                .onTapGesture { vm.rotateTip() }
-            Spacer()
-            Menu {
-                Button(prefs.showBackgroundApps ? "Arka plan uygulamalarını gizle" : "Arka plan uygulamalarını gör") {
-                    prefs.showBackgroundApps.toggle()
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    ForEach(vm.rows) { entry in
+                        AppRowView(entry: entry, isSelected: vm.selected.contains(entry.id),
+                                   forceMode: vm.effectiveForce, accent: accent,
+                                   isProtected: prefs.isProtected(entry),
+                                   onProtect: { prefs.toggleProtection(entry) },
+                                   onToggle: { vm.toggle(entry.id) },
+                                   onQuit: { quit.quit(entries: [entry], force: vm.effectiveForce) },
+                                   onForceQuit: { quit.quit(entries: [entry], force: true) },
+                                   onUnhide: { apps.unhide(pid: entry.id) },
+                                   onReveal: { reveal(entry) })
+                    }
+                    if vm.rows.isEmpty {
+                        VStack(spacing: 6) {
+                            Image(systemName: "magnifyingglass").font(.title2)
+                            Text(vm.search.isEmpty ? "Listelenecek uygulama yok" : "Eşleşen uygulama bulunamadı")
+                            if !vm.search.isEmpty { Button("Aramayı temizle") { vm.search = "" } }
+                        }.foregroundColor(.secondary).padding(.vertical, 28)
+                    }
                 }
-                Divider()
-                Button("Tercihler…") { NotificationCenter.default.post(name: .openPreferencesRequested, object: nil) }
-                Button("Yardım") { NSWorkspace.shared.open(URL(string: "https://amicoapps.com/support/")!) }
-                Divider()
-                Button("KillBill'den Çık") { NSApp.terminate(nil) }
+            }.frame(height: 280)
+            Divider()
+            HStack {
+                Text("\(vm.targets.count) seçili · \(vm.rows.filter { prefs.isProtected($0) }.count) korunan")
+                    .font(.caption).foregroundColor(.secondary)
+                Spacer()
+                Menu {
+                    Button("Ayarlar…") { NotificationCenter.default.post(name: .openPreferencesRequested, object: nil) }
+                    if prefs.includeTrashInList { Button("Çöp Kutusunu Boşalt…") { quit.emptyTrash() } }
+                    Button("Yardım") { NSWorkspace.shared.open(URL(string: "https://github.com/BeNKaYS/KillBill#readme")!) }
+                    Divider()
+                    Button("KillBill'den Çık") { NSApp.terminate(nil) }
+                } label: { Image(systemName: "gearshape") }
+                .menuStyle(.borderlessButton).fixedSize().accessibilityLabel("KillBill menüsü")
+            }
+            Button {
+                quit.quit(entries: vm.targets, force: vm.effectiveForce)
             } label: {
-                Image(systemName: "line.3.horizontal")
-                    .font(.system(size: 13, weight: .semibold))
+                Label("Seçilen \(vm.targets.count) uygulamayı \(vm.effectiveForce ? "zorla kapat" : "kapat")",
+                      systemImage: vm.effectiveForce ? "bolt.fill" : "power")
+                    .frame(maxWidth: .infinity).padding(.vertical, 5)
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .frame(width: 28)
+            .buttonStyle(.borderedProminent)
+            .tint(vm.effectiveForce ? .red : accent)
+            .disabled(vm.targets.isEmpty || quit.isBusy)
+
+            if !quit.statusMessage.isEmpty {
+                Text(quit.statusMessage).font(.caption).frame(maxWidth: .infinity, alignment: .leading)
+                if !quit.results.isEmpty {
+                    DisclosureGroup("İşlem ayrıntıları") {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(quit.results) { result in
+                                    Text("\(result.name): \(result.state.rawValue)").font(.caption)
+                                }
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                        }.frame(maxHeight: 80)
+                    }.font(.caption)
+                }
+            } else if !prefs.disableTips {
+                Text("Option: zorla kapat · Kilit: toplu kapatmadan koru")
+                    .font(.caption).foregroundColor(.secondary)
+            }
         }
-        .padding(.top, 4)
-        .overlay(Rectangle().frame(height: 1).foregroundColor(Color.primary.opacity(0.08)), alignment: .top)
+        .padding(14).frame(width: 380)
+        .background(VisualEffectView())
+        .onAppear { vm.syncSelection(); vm.beginObservingKeys() }
+        .onDisappear { vm.endObservingKeys() }
     }
 
     private func reveal(_ entry: AppEntry) {
-        if let url = RunningAppsManager.shared.runningApplication(pid: entry.id)?.bundleURL {
-            NSWorkspace.shared.activateFileViewerSelecting([url])
-        }
-    }
-
-    // Option tuşu ile Kapat/Zorla Kapat geçişi
-    private func installFlagsMonitor() {
-        NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { ev in
-            vm.forceMode = ev.modifierFlags.contains(.option)
-            return ev
-        }
+        if let url = apps.runningApplication(pid: entry.id)?.bundleURL { NSWorkspace.shared.activateFileViewerSelecting([url]) }
     }
 }
 
-// MARK: - Onay kutusu (native görünüm)
 struct CheckBox: View {
     @Binding var isOn: Bool
     var body: some View {
-        Button(action: { isOn.toggle() }) {
-            Image(systemName: isOn ? "checkmark.square.fill" : "square")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundColor(isOn ? Color(red: 0.996, green: 0.737, blue: 0.200) : .secondary)
-        }
-        .buttonStyle(.plain)
-        .frame(width: 18)
+        Toggle("Seç", isOn: $isOn).labelsHidden().toggleStyle(.checkbox)
     }
 }

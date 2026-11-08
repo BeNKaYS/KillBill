@@ -1,127 +1,122 @@
 # KillBill
 
-**QuitAll** (Amico Apps) uygulamasının birebir menü çubuğu klonu.
-Çalışan uygulamaları tek yerden — bir kısmını ya da hepsini — kapatın.
+Çalışan uygulamaları menü çubuğundan tek yerden yönetin: seçtiklerinizi normal ya da
+zorla kapatın, korunan uygulamaları toplu işlemlerin dışında tutun.
 
 > "A fresh start without a restart."
 
----
-
-## Nasıl çalışır
-
-KillBill bir menü çubuğu (LSUIElement) uygulamasıdır. Menü çubuğundaki ikona tıklayınca
-bir panel açılır:
-
-- **Quit All** butonu — seçili tüm uygulamaları kapatır (Option tuşuyla *Force Quit All*).
-- **Search** — uygulamalarda filtreleme.
-- **Seçim kutuları** — satır satır ya da hepsini seç/kaldır.
-- **Her satır:** onay kutusu · uygulama ikonu · ad · CPU % · güç/`⏻` (Option ile `⚡`) · `⋯` menüsü
-  (Quit / Force Quit / Bring to Front / Reveal in Finder).
-- **Alt bilgi:** dönen ipucu metni + `☰` menüsü (View background apps · Preferences · Help · Quit).
-
-Uygulamalar, kapanmadan önce kaydetmeniz için sizi uyarır. Force Quit ise kaydedilmemiş
-değişiklikleri yok sayar.
-
----
-
-## Tersine mühendislik kaynağı
-
-Klon, sistemde kurulu gerçek **QuitAll 1.3.6 (build 206)** paketinden çıkarıldı
-(`/Applications/QuitAll.app`). Kullanılan kanıtlar:
-
-| Kanıt | Ne verdi |
-|---|---|
-| `Contents/MacOS/QuitAll` (string tablosu) | Sınıf/ivar adları, tüm ayar anahtarları, menü/uyarı metinleri, dönen ipuçları |
-| `Base.lproj/*.storyboardc` (REA `decode-interface-builder`) | Preferences sekmeleri, kontroller, çerçeveler, tüm tooltip metinleri |
-| `Assets.car` (REA `inspect-asset-catalog`) | UI ikon adları + **AccentColor = sRGB(0.996, 0.737, 0.200) = `#FEC033`** |
-| `defaults read com.quitallapp.quitall-paddle` | Canlı kullanıcı ayarları |
-| Setapp/Amico ekran görüntüleri | Panel ve Preferences görsel tasarımı |
-
-> Not: REA'nın Hopper sağlayıcısı bu makinede `~/Applications` altında Hopper arıyordu;
-> `/Applications` altındaki Hopper'a bir sembolik bağ ile düzeltildi. Tasarım için Hopper'a
-> gerek kalmadı — storyboard + asset kataloğu + string tablosu yeterli oldu.
-
----
-
-## Birebir ayar anahtarları
-
-`UserDefaults` anahtarları orijinal QuitAll ile **aynı** (bkz. `Core/PreferencesManager.swift`):
-
-| Anahtar | Anlam |
-|---|---|
-| `kUserdefaultsPlaySound` | Kapatma sesi |
-| `kUserdefaultsGroupBackgroundApps` | Arka plan kopyalarını grupla |
-| `kUserdefaultsShowBackgroundApps` | Arka plan uygulamalarını göster |
-| `kUserdefaultsDeselectApps` | Varsayılan olarak seçimi kaldır |
-| `kUserdefaultsDisableTips` | İpuçlarını kapat |
-| `kUserdefaultsQuitOption` | `Quit` / `Force Quit` |
-| `kUserdefaultsMenuAppsSort` | `0` alfabetik · `1` CPU |
-| `kUserdefaultsQuitInactiveAppsAfter` | `{enabled, minutes, unit}` JSON |
-| `kUserdefaultsShortcutActivate/Quit/ForceQuit` | `{keyCode, modifiers, enabled, deleted}` JSON |
-| `includeFinderInList` / `includeTrashInList` | Finder / Çöp satırı |
-| `kUserdefaultsUseSystemColor` | Vurgu için sistem rengi |
-
-## Preferences sekmeleri
-
-General · Shortcuts · Support · About · License · **Developer**
-
-General sekmesindeki alanlar orijinalden: Startup (Open at login), Fun (Play cool sounds,
-Use default system color), Advanced (View/Group background apps, Deselect apps by default,
-Quit inactive apps after + süre, Disable quit tips, Include Finder/Trash), Sort, Default, Reset all
-ve **Permissions** bölümü.
-
----
-
-## İzinler
-
-- **Automation (Apple Events)** — Finder'ı kapatmak ve çöp kutusunu boşaltmak için.
-  `Preferences ▸ General ▸ Permissions ▸ İste` ile talep edilir; verilmezse ilgili işlemler
-  Sistem Ayarları'na yönlendirir.
-- **Accessibility** — pencere/süreç denetimi için (isteğe bağlı).
-- Uygulamaların normal/force kapatılması ve CPU okuma **izin gerektirmez** (NSRunningApplication).
-
----
-
-## Derleme
+KillBill, macOS 13+ için SwiftUI/AppKit ile yazılmış bir menü çubuğu (LSUIElement)
+uygulamasıdır. Bu sürüm, Amico Apps'in QuitAll uygulamasından esinlenen bir klonun
+bağımsız, bakımı yapılan sürümüdür.
 
 ```bash
-./build_app.sh     # → KillBill.app
-./build_pkg.sh     # → KillBill.pkg (kurulum sonu BeNKaYS geliştirici kartı)
+./build_app.sh          # → KillBill.app + KillBill.zip
+./build_pkg.sh          # → KillBill.pkg (imzalı ya da yerel imzasız)
+./test.sh               # → regresyon kontrolleri
 open KillBill.app
 ```
 
-Gereksinim: Xcode **Command Line Tools** (Swift 5.9+). Not: SwiftUI `@State` makrosu CLT'de
-bulunmadığından bu projede `@State` yerine düz `State` yapısı kullanılır.
+Gereksinim: Xcode Command Line Tools (Swift 5.9+).
 
-## Geliştirici kartı
+## Kullanım
 
-- Uygulama içinde: **Preferences ▸ Developer** (WKWebView).
-- Kurucuda: `.pkg` **conclusion** ekranı — avatar ve QR kod satır içine gömülü, kendi kendine
-  yeten HTML (`installer/conclusion.html`, `build_pkg.sh` tarafından üretilir).
+- **Panel:** arama, sıralama, tekli/toplu seçim, CPU değeri.
+- **Kapat:** düğme hedef sayısını ve modu söyler (`Seçilen 3 uygulamayı kapat`).
+  Option tuşu zorla kapatma modunu gösterir; zorla toplu kapatma onay ister.
+- **Korunan uygulamalar:** satırdaki kilit simgesiyle eklenir. Korunanlar seçilemez,
+  tekli ve toplu kapatmada atlanır. Liste `Ayarlar ▸ Kapatma` altında yönetilir.
+- **Sonuç:** her hedef için `Yanıt bekleniyor`, `Kapandı`, `Kapatılamadı` ya da
+  `Hâlâ açık` durumu gösterilir. Kaydetme diyaloğunda bekleyen uygulama kapanmış sayılmaz;
+  zaman aşımı otomatik zorla kapatmaya dönüşmez.
+- **Kısayollar:** panel açma, tümünü kapatma, tümünü zorla kapatma. Command, Option
+  veya Control içeren birleşimler gerekir; `⌘A` gibi harfler kaydedilebilir, Escape iptal
+  eder, Delete siler. Çakışma arayüzde bildirilir.
 
-Kaynaklar: `Sources/KillBill/Resources/developer_card.html`, `avatar.png`, `qrcode.min.js`.
+## Ayarlar
 
----
+| Sekme | İçerik |
+|---|---|
+| Genel | Açılışta başlat, menü çubuğu simgesi, ses, sistem rengi, arka plan uygulamaları, gruplama, Finder, Çöp eylemi, sıralama, izinler, sıfırlama |
+| Kapatma | Varsayılan işlem ve korunan uygulama listesi |
+| Kısayollar | Üç global kısayol ve doğrulama mesajları |
+| Güncelleme | Yerel klasör / GitHub, kontrol ve güncelleme, yedekler |
+| Hakkında | Sürüm, kısa tanıtım, geliştirici bilgisi |
+
+Otomatik hareketsizlik kapatması bu sürümde kullanılamıyor; uygulamalar yalnızca
+kullanıcı işlemiyle kapatılır.
+
+## Güncelleme
+
+Akış: kontrol → bildir → onay → yedek → indir → doğrula → yaz → yeniden aç → gerekirse geri al.
+
+- Tek sürüm kaynağı kökteki `version.json`; `.app`, `.zip` ve `.pkg` aynı sürümü taşır.
+- GitHub release (önerilen) ya da dal, veya yerel klasör. HTTPS zorunludur; yönlendirmelerde de.
+- Paket, açılmadan önce ZIP yapısı için denetlenir: yalnızca `KillBill.app/` girdileri,
+  sembolik bağ yok, şifreli/çok parçalı/boyut aşan arşiv reddedilir.
+- Açıldıktan sonra kimlik, çalıştırılabilir dosya, `version.json` sürümü ve (uzak kaynakta)
+  aynı Developer ID takımı imzası doğrulanır.
+- **Güncelleme açılamazsa** yeni sürüm ayrılır, önceki sürüm geri konur ve sonuç Ayarlar'da
+  gösterilir. Yedekler `~/Library/Application Support/KillBill/Yedek/` altındadır.
+- Özel depo anahtarı yalnızca macOS Anahtar Zinciri'nde tutulur; ayarlara yazılmaz.
+
+## İmzalama ve dağıtım
+
+Varsayılan betikler ad-hoc imza üretir ve yalnızca yerel kullanım içindir. Başka Mac'lere
+dağıtım için:
+
+```bash
+KILLBILL_SIGN_IDENTITY="Developer ID Application: ..." ./build_pkg.sh
+```
+
+Sonrasında Apple notarizasyonu (`notarytool submit --wait` + `stapler`) gerekir. Bu adımlar
+Apple Developer hesabı ve sertifika gerektirdiği için depoya eklenmemiştir.
+
+## Testler
+
+```bash
+./test.sh
+```
+
+`Tests/main.swift` üretim kodunu derleyip sahte süreç işlemleriyle çalışır; gerçek
+uygulamaları kapatmaz. Kapsanan davranışlar: normal/zorla kapatma ayrımı, korunan
+uygulamalar, kapanma takibi ve zaman aşımı, arama/gruplama, kısayol kodları,
+tercih kalıcılığı ve sıfırlama, sürüm/ZIP doğrulaması, kurulum ve geri alma.
+
+## İzinler
+
+- **Automation (Apple Events):** Finder'ı kapatmak ve çöpü boşaltmak için. Verilmezse
+  KillBill ilgili işlemi yapmaz ve Sistem Ayarları'nı önerir.
+- Uygulamaların normal/zorla kapatılması ve CPU okuma izin gerektirmez.
 
 ## Yapı
 
 ```
 Sources/KillBill/
   main.swift                      # NSApplication giriş noktası
-  App/AppDelegate.swift           # menü çubuğu + panel + tercihler penceresi
+  App/AppDelegate.swift           # menü çubuğu, panel, ayarlar penceresi
   Core/
-    PreferencesManager.swift      # birebir UserDefaults anahtarları
-    RunningAppsManager.swift      # uygulama listesi + CPU (ps) + quit/forceQuit
-    PermissionsManager.swift      # Automation / Accessibility
-    QuitService.swift             # toplu/tekil kapatma
+    PreferencesManager.swift      # tercihler, korunan uygulamalar, giriş öğesi
+    RunningAppsManager.swift      # uygulama listesi, CPU, gruplama
+    QuitService.swift             # kapatma politikası ve sonuç takibi
+    UpdateManager.swift           # güncelleme orkestrasyonu
+    UpdateValidation.swift        # sürüm/ZIP/imza doğrulama, geri alma
     HotkeyManager.swift           # Carbon global kısayollar
+    PermissionsManager.swift      # Automation izni
     SoundPlayer.swift             # kapatma sesleri
+    StatusIcon.swift              # menü çubuğu simgeleri
   Views/
-    MenuPanelView.swift           # panel (QuitAll tasarımı)
-    AppRowView.swift              # liste satırı
-    PreferencesView.swift         # sekmeli tercihler
-    DeveloperCardView.swift       # geliştirici kartı (WKWebView)
+    MenuPanelView.swift           # panel
+    AppRowView.swift              # uygulama satırı
+    PreferencesView.swift         # sekmeli ayarlar
     ShortcutRecorderView.swift    # kısayol kaydedici
-  Resources/                      # ikon, avatar, kart, ses, JS
-installer/                        # pkg distribution + welcome + conclusion
+    DeveloperCardView.swift       # (eski kart; artık kullanılmıyor)
+    ViewState.swift               # CLT uyumlu State eşlemesi
+installer/                        # pkg dağıtımı ve sade sonuç ekranı
+Tests/main.swift                  # regresyon kontrolleri
+test.sh                           # test çalıştırıcısı
 ```
+
+## Geliştirici
+
+**Sercan ÖZDEMİR (BeNKaYS)** · Bilişim Teknolojileri Öğretmeni
+[sercanozdemir@yandex.com](mailto:sercanozdemir@yandex.com) · [github.com/BeNKaYS](https://github.com/BeNKaYS)
